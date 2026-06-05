@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"tmk-glance/internal/language"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -51,18 +53,7 @@ func handleHealth(c *gin.Context) {
 // ---------- languages ----------
 
 func handleLanguages(c *gin.Context) {
-	c.JSON(200, gin.H{
-		"languages": []gin.H{
-			{"code": "zh", "name": "中文", "tts_voices": []string{"longanyang"}},
-			{"code": "en", "name": "English", "tts_voices": []string{"longanyang"}},
-			{"code": "ja", "name": "日本語", "tts_voices": []string{"longanyang"}},
-			{"code": "ko", "name": "한국어", "tts_voices": []string{"longanyang"}},
-			{"code": "fr", "name": "Français", "tts_voices": []string{"longanyang"}},
-			{"code": "de", "name": "Deutsch", "tts_voices": []string{"longanyang"}},
-			{"code": "es", "name": "Español", "tts_voices": []string{"longanyang"}},
-			{"code": "ru", "name": "Русский", "tts_voices": []string{"longanyang"}},
-		},
-	})
+	c.JSON(200, gin.H{"languages": language.All})
 }
 
 // ---------- audio devices ----------

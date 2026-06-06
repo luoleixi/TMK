@@ -1,0 +1,119 @@
+import { useState } from 'react';
+
+const LANGUAGES = [
+  { code: 'zh', name: '中文' },
+  { code: 'en', name: 'English' },
+  { code: 'ja', name: '日本語' },
+  { code: 'ko', name: '한국어' },
+  { code: 'fr', name: 'Français' },
+  { code: 'de', name: 'Deutsch' },
+  { code: 'es', name: 'Español' },
+  { code: 'ru', name: 'Русский' },
+];
+
+const INPUT_TYPES = [
+  { value: 'system_audio', label: '系统音频' },
+  { value: 'microphone', label: '麦克风' },
+];
+
+type Record = {
+  id: number;
+  sourceText: string;
+  translatedText: string;
+};
+
+function App() {
+  const [sourceLang, setSourceLang] = useState('zh');
+  const [targetLang, setTargetLang] = useState('en');
+  const [inputType, setInputType] = useState('system_audio');
+  const [running, setRunning] = useState(false);
+  const [sourceText, setSourceText] = useState('');
+  const [translatedText, setTranslatedText] = useState('');
+  const [records, setRecords] = useState<Record[]>([]);
+  const [status, setStatus] = useState('就绪');
+
+  const handleToggle = () => {
+    if (running) {
+      setStatus('已停止');
+      setRunning(false);
+    } else {
+      setStatus('启动中...');
+      setRunning(true);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 600, margin: '0 auto', padding: 24, fontFamily: 'sans-serif' }}>
+      <h1 style={{ textAlign: 'center' }}>TMK 同声传译</h1>
+
+      {/* 语言选择 */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+        <label style={{ flex: 1 }}>
+          源语言
+          <select value={sourceLang} onChange={e => setSourceLang(e.target.value)}
+            style={{ width: '100%', padding: 8, marginTop: 4 }}>
+            {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+          </select>
+        </label>
+        <label style={{ flex: 1 }}>
+          目标语言
+          <select value={targetLang} onChange={e => setTargetLang(e.target.value)}
+            style={{ width: '100%', padding: 8, marginTop: 4 }}>
+            {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {/* 音频来源 */}
+      <div style={{ marginBottom: 16 }}>
+        <span style={{ marginRight: 16 }}>音频来源：</span>
+        {INPUT_TYPES.map(t => (
+          <label key={t.value} style={{ marginRight: 12 }}>
+            <input type="radio" value={t.value} checked={inputType === t.value}
+              onChange={e => setInputType(e.target.value)} />
+            {t.label}
+          </label>
+        ))}
+      </div>
+
+      {/* 控制按钮 */}
+      <div style={{ textAlign: 'center', marginBottom: 16 }}>
+        <button onClick={handleToggle}
+          style={{
+            padding: '12px 48px', fontSize: 18, cursor: 'pointer',
+            background: running ? '#e74c3c' : '#2ecc71', color: '#fff',
+            border: 'none', borderRadius: 8,
+          }}>
+          {running ? '停止翻译' : '开始翻译'}
+        </button>
+        <p style={{ color: '#888', marginTop: 8 }}>{status}</p>
+      </div>
+
+      {/* 字幕显示 */}
+      <div style={{ background: '#1e1e1e', color: '#fff', borderRadius: 8, padding: 16, minHeight: 80, marginBottom: 16 }}>
+        <p style={{ margin: 0, fontSize: 20 }}>{sourceText || '等待语音输入...'}</p>
+        <p style={{ margin: '4px 0 0', fontSize: 18, color: '#4ec9b0' }}>
+          {translatedText || ''}
+        </p>
+      </div>
+
+      {/* 历史记录 */}
+      <div>
+        <h3>翻译记录</h3>
+        {records.length === 0 ? (
+          <p style={{ color: '#888' }}>暂无记录</p>
+        ) : (
+          records.map(r => (
+            <div key={r.id} style={{ borderBottom: '1px solid #ddd', padding: '8px 0' }}>
+              <span>{r.sourceText}</span>
+              <span style={{ margin: '0 8px', color: '#aaa' }}>→</span>
+              <span style={{ color: '#2ecc71' }}>{r.translatedText}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default App;

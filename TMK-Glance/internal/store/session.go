@@ -8,9 +8,9 @@ import (
 )
 
 type SessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*model.Session
-	records  map[string][]model.Record
+	mu           sync.RWMutex
+	sessions     map[string]*model.Session
+	records      map[string][]model.Record
 }
 
 func NewSessionStore() *SessionStore {
@@ -20,23 +20,11 @@ func NewSessionStore() *SessionStore {
 	}
 }
 
-func (s *SessionStore) AddRecord(sessionID string, r model.Record) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.records[sessionID] = append(s.records[sessionID], r)
-}
-
-func (s *SessionStore) Records(sessionID string) ([]model.Record, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	recs, ok := s.records[sessionID]
-	return recs, ok
-}
-
 func (s *SessionStore) Create(ses *model.Session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[ses.ID] = ses
+	s.records[ses.ID] = make([]model.Record, 0)
 }
 
 func (s *SessionStore) Get(id string) (*model.Session, bool) {
@@ -57,4 +45,21 @@ func (s *SessionStore) End(id string) bool {
 	ses.Status = "ended"
 	ses.EndedAt = &now
 	return true
+}
+
+func (s *SessionStore) AddRecord(sessionID string, r model.Record) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r.ID = len(s.records[sessionID]) + 1
+	s.records[sessionID] = append(s.records[sessionID], r)
+	if ses, ok := s.sessions[sessionID]; ok {
+		ses.RecordCount = len(s.records[sessionID])
+	}
+}
+
+func (s *SessionStore) Records(sessionID string) ([]model.Record, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	recs, ok := s.records[sessionID]
+	return recs, ok
 }

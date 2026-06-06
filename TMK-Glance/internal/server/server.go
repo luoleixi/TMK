@@ -183,7 +183,13 @@ func handleInterpret(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
-	log.Printf("[ws] client connected")
+
+	sessionID := c.Query("session_id")
+	if _, ok := sessionStore.Get(sessionID); !ok {
+		conn.WriteJSON(gin.H{"type": "error", "message": "invalid session_id"})
+		return
+	}
+	log.Printf("[ws] client connected, session: %s", sessionID)
 
 	var (
 		asrEngine asr.ASR
@@ -213,8 +219,9 @@ func handleInterpret(c *gin.Context) {
 
 		switch wsMsg.Type {
 		case "start":
+			ses, _ := sessionStore.Get(sessionID)
 			asrCtx, asrCancel = context.WithCancel(context.Background())
-			asrEngine = newASR(wsMsg.SourceLang)
+			asrEngine = newASR(ses.SourceLang)
 			audioCh = make(chan []byte, 8)
 
 			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
@@ -222,6 +229,9 @@ func handleInterpret(c *gin.Context) {
 				conn.WriteJSON(gin.H{"type": "error", "message": err.Error()})
 				continue
 			}
+
+			sourceLang := ses.SourceLang
+			targetLang := ses.TargetLang
 
 			conn.WriteJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
 
@@ -233,6 +243,23 @@ func handleInterpret(c *gin.Context) {
 						"is_final":  r.IsFinal,
 						"timestamp": time.Now().UnixMilli(),
 					})
+					if r.Text != "" {
+						translated, _ := translateSvc.Translate(sourceLang, targetLang, r.Text)
+						conn.WriteJSON(gin.H{
+							"type":      "translation",
+							"text":      translated,
+							"is_final":  r.IsFinal,
+							"timestamp": time.Now().UnixMilli(),
+						})
+						if r.IsFinal {
+							sessionStore.AddRecord(sessionID, model.Record{
+								SessionID:      sessionID,
+								SourceText:     r.Text,
+								TranslatedText: translated,
+								Timestamp:      time.Now(),
+							})
+						}
+					}
 				}
 			}()
 

@@ -223,6 +223,9 @@ func handleInterpret(c *gin.Context) {
 				continue
 			}
 
+			sourceLang := wsMsg.SourceLang
+			targetLang := wsMsg.TargetLang
+
 			conn.WriteJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
 
 			go func() {
@@ -233,6 +236,15 @@ func handleInterpret(c *gin.Context) {
 						"is_final":  r.IsFinal,
 						"timestamp": time.Now().UnixMilli(),
 					})
+					if r.IsFinal && r.Text != "" {
+						translated, _ := translateSvc.Translate(sourceLang, targetLang, r.Text)
+						conn.WriteJSON(gin.H{
+							"type":      "translation",
+							"text":      translated,
+							"is_final":  true,
+							"timestamp": time.Now().UnixMilli(),
+						})
+					}
 				}
 			}()
 

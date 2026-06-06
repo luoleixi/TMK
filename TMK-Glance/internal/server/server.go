@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"tmk-glance/internal/language"
+	"tmk-glance/internal/health"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -16,13 +17,11 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-func Start(addr string) error {
+func SetupRouter() *gin.Engine {
 	r := gin.Default()
 
-	// CORS
 	r.Use(corsMiddleware())
 
-	// health
 	r.GET("/api/health", handleHealth)
 
 	v1 := r.Group("/api/v1")
@@ -38,15 +37,17 @@ func Start(addr string) error {
 		v1.GET("/interpret", handleInterpret)
 	}
 
-	return r.Run(addr)
+	return r
 }
 
 // ---------- health ----------
 
 func handleHealth(c *gin.Context) {
 	c.JSON(200, gin.H{
-		"status": "ok", "timestamp": time.Now().Unix(), "version": "1.0.0",
-		"services": gin.H{"asr": true, "translator": true, "tts": true},
+		"status":    health.Status(),
+		"timestamp": time.Now().Unix(),
+		"version":   "1.0.0",
+		"services":  health.Services(),
 	})
 }
 

@@ -13,6 +13,7 @@ import (
 	"tmk-glance/internal/language"
 	"tmk-glance/internal/model"
 	"tmk-glance/internal/store"
+	"tmk-glance/internal/translator"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -24,9 +25,11 @@ var upgrader = websocket.Upgrader{
 }
 
 var sessionStore = store.NewSessionStore()
+var translateSvc translator.Translator
 
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	asrCfg = cfg
+	translateSvc = newTranslator(cfg)
 
 	r := gin.Default()
 
@@ -44,6 +47,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		v1.GET("/sessions/:id/records", handleGetRecords)
 		v1.GET("/history", handleListHistory)
 		v1.GET("/history/:id", handleGetHistory)
+		v1.POST("/translate", handleTranslate)
 		v1.GET("/interpret", handleInterpret)
 	}
 
@@ -138,6 +142,26 @@ func handleGetRecords(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": recs})
+}
+
+// ---------- translate ----------
+
+func handleTranslate(c *gin.Context) {
+	var req struct {
+		Text       string `json:"text"`
+		SourceLang string `json:"source_lang"`
+		TargetLang string `json:"target_lang"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": err.Error()})
+		return
+	}
+	if req.Text == "" || req.SourceLang == "" || req.TargetLang == "" {
+		c.JSON(400, gin.H{"code": 400, "message": "text, source_lang and target_lang are required"})
+		return
+	}
+	result, _ := translateSvc.Translate(req.SourceLang, req.TargetLang, req.Text)
+	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"translated_text": result}})
 }
 
 // ---------- history ----------
@@ -244,6 +268,23 @@ func newASR(language string) asr.ASR {
 	default:
 		log.Println("[asr] using Mock")
 		return asr.NewMock()
+	}
+}
+
+// ---------- Translator factory ----------
+
+func newTranslator(cfg *config.Config) translator.Translator {
+	switch cfg.Translator.Provider {
+	case "bailian":
+		key := cfg.Translator.Bailian.APIKey
+		if key == "" {
+			log.Fatal("[translator] DASHSCOPE_API_KEY required when translator.provider=bailian")
+		}
+		log.Println("[translator] using Bailian (qwen-turbo)")
+		return translator.NewBailian(key)
+	default:
+		log.Println("[translator] using Mock")
+		return translator.NewMock()
 	}
 }
 

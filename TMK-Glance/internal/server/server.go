@@ -219,8 +219,9 @@ func handleInterpret(c *gin.Context) {
 
 		switch wsMsg.Type {
 		case "start":
+			ses, _ := sessionStore.Get(sessionID)
 			asrCtx, asrCancel = context.WithCancel(context.Background())
-			asrEngine = newASR(wsMsg.SourceLang)
+			asrEngine = newASR(ses.SourceLang)
 			audioCh = make(chan []byte, 8)
 
 			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
@@ -229,8 +230,8 @@ func handleInterpret(c *gin.Context) {
 				continue
 			}
 
-			sourceLang := wsMsg.SourceLang
-			targetLang := wsMsg.TargetLang
+			sourceLang := ses.SourceLang
+			targetLang := ses.TargetLang
 
 			conn.WriteJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
 

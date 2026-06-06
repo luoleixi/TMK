@@ -124,7 +124,11 @@ func handleGetSession(c *gin.Context) {
 }
 
 func handleDeleteSession(c *gin.Context) {
-	c.JSON(200, gin.H{"message": "stub"})
+	if !sessionStore.End(c.Param("id")) {
+		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "message": "ok"})
 }
 
 func handleGetRecords(c *gin.Context) {

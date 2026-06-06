@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { SessionService } from '../bindings/changeme';
+import { SessionService, CaptureService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
 
 const LANGUAGES = [
@@ -53,6 +53,7 @@ function App() {
   const handleToggle = async () => {
     if (running) {
       setStatus('停止中...');
+      CaptureService.StopCapture();
       await SessionService.StopInterpret();
       setStatus('已停止');
       setRunning(false);
@@ -60,6 +61,7 @@ function App() {
       setStatus('创建会话中...');
       try {
         await SessionService.CreateSession(sourceLang, targetLang, inputType);
+        await CaptureService.StartCapture(-1);
         await SessionService.StartInterpret();
         setStatus('翻译中...');
         setRunning(true);

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"tmk-glance/internal/asr"
@@ -141,7 +142,7 @@ func handleInterpret(c *gin.Context) {
 		switch wsMsg.Type {
 		case "start":
 			asrCtx, asrCancel = context.WithCancel(context.Background())
-			asrEngine = asr.NewMock()
+			asrEngine = newASR()
 			audioCh = make(chan []byte, 8)
 
 			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
@@ -176,6 +177,23 @@ func handleInterpret(c *gin.Context) {
 			conn.WriteJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
 			return
 		}
+	}
+}
+
+// ---------- ASR factory ----------
+
+func newASR() asr.ASR {
+	switch os.Getenv("ASR_PROVIDER") {
+	case "bailian":
+		key := os.Getenv("DASHSCOPE_API_KEY")
+		if key == "" {
+			log.Fatal("[asr] DASHSCOPE_API_KEY required when ASR_PROVIDER=bailian")
+		}
+		log.Println("[asr] using Bailian (DashScope)")
+		return asr.NewBailian(key)
+	default:
+		log.Println("[asr] using Mock")
+		return asr.NewMock()
 	}
 }
 

@@ -242,20 +242,22 @@ func handleInterpret(c *gin.Context) {
 						"is_final":  r.IsFinal,
 						"timestamp": time.Now().UnixMilli(),
 					})
-					if r.IsFinal && r.Text != "" {
+					if r.Text != "" {
 						translated, _ := translateSvc.Translate(sourceLang, targetLang, r.Text)
 						conn.WriteJSON(gin.H{
 							"type":      "translation",
 							"text":      translated,
-							"is_final":  true,
+							"is_final":  r.IsFinal,
 							"timestamp": time.Now().UnixMilli(),
 						})
-						sessionStore.AddRecord(sessionID, model.Record{
-							SessionID:      sessionID,
-							SourceText:     r.Text,
-							TranslatedText: translated,
-							Timestamp:      time.Now(),
-						})
+						if r.IsFinal {
+							sessionStore.AddRecord(sessionID, model.Record{
+								SessionID:      sessionID,
+								SourceText:     r.Text,
+								TranslatedText: translated,
+								Timestamp:      time.Now(),
+							})
+						}
 					}
 				}
 			}()

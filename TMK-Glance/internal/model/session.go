@@ -11,3 +11,11 @@ type Session struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	EndedAt    *time.Time `json:"ended_at,omitempty"`
 }
+
+type Record struct {
+	ID             int       `json:"id"`
+	SessionID      string    `json:"session_id"`
+	SourceText     string    `json:"source_text"`
+	TranslatedText string    `json:"translated_text"`
+	Timestamp      time.Time `json:"timestamp"`
+}

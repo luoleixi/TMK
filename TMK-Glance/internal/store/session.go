@@ -10,10 +10,27 @@ import (
 type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*model.Session
+	records  map[string][]model.Record
 }
 
 func NewSessionStore() *SessionStore {
-	return &SessionStore{sessions: make(map[string]*model.Session)}
+	return &SessionStore{
+		sessions: make(map[string]*model.Session),
+		records:  make(map[string][]model.Record),
+	}
+}
+
+func (s *SessionStore) AddRecord(sessionID string, r model.Record) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records[sessionID] = append(s.records[sessionID], r)
+}
+
+func (s *SessionStore) Records(sessionID string) ([]model.Record, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	recs, ok := s.records[sessionID]
+	return recs, ok
 }
 
 func (s *SessionStore) Create(ses *model.Session) {

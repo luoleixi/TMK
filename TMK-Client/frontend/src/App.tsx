@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { SessionService } from '../bindings/changeme';
+import { Events } from '@wailsio/runtime';
 
 const LANGUAGES = [
   { code: 'zh', name: '中文' },
@@ -16,7 +18,7 @@ const INPUT_TYPES = [
   { value: 'microphone', label: '麦克风' },
 ];
 
-type Record = {
+type RecordEntry = {
   id: number;
   sourceText: string;
   translatedText: string;
@@ -29,16 +31,41 @@ function App() {
   const [running, setRunning] = useState(false);
   const [sourceText, setSourceText] = useState('');
   const [translatedText, setTranslatedText] = useState('');
-  const [records, setRecords] = useState<Record[]>([]);
+  const [records, setRecords] = useState<RecordEntry[]>([]);
   const [status, setStatus] = useState('就绪');
 
-  const handleToggle = () => {
+  useEffect(() => {
+    Events.On('transcript', (data: any) => {
+      setSourceText(data.text);
+    });
+    Events.On('translation', (data: any) => {
+      setTranslatedText(data.text);
+      if (data.is_final) {
+        setRecords(prev => [...prev, {
+          id: Date.now(),
+          sourceText: sourceText || data.text,
+          translatedText: data.text,
+        }]);
+      }
+    });
+  }, []);
+
+  const handleToggle = async () => {
     if (running) {
+      setStatus('停止中...');
+      await SessionService.StopInterpret();
       setStatus('已停止');
       setRunning(false);
     } else {
-      setStatus('启动中...');
-      setRunning(true);
+      setStatus('创建会话中...');
+      try {
+        await SessionService.CreateSession(sourceLang, targetLang, inputType);
+        await SessionService.StartInterpret();
+        setStatus('翻译中...');
+        setRunning(true);
+      } catch (e: any) {
+        setStatus('连接失败: ' + e.message);
+      }
     }
   };
 
@@ -46,7 +73,6 @@ function App() {
     <div style={{ maxWidth: 600, margin: '0 auto', padding: 24, fontFamily: 'sans-serif' }}>
       <h1 style={{ textAlign: 'center' }}>TMK 同声传译</h1>
 
-      {/* 语言选择 */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
         <label style={{ flex: 1 }}>
           源语言
@@ -64,7 +90,6 @@ function App() {
         </label>
       </div>
 
-      {/* 音频来源 */}
       <div style={{ marginBottom: 16 }}>
         <span style={{ marginRight: 16 }}>音频来源：</span>
         {INPUT_TYPES.map(t => (
@@ -76,7 +101,6 @@ function App() {
         ))}
       </div>
 
-      {/* 控制按钮 */}
       <div style={{ textAlign: 'center', marginBottom: 16 }}>
         <button onClick={handleToggle}
           style={{
@@ -89,7 +113,6 @@ function App() {
         <p style={{ color: '#888', marginTop: 8 }}>{status}</p>
       </div>
 
-      {/* 字幕显示 */}
       <div style={{ background: '#1e1e1e', color: '#fff', borderRadius: 8, padding: 16, minHeight: 80, marginBottom: 16 }}>
         <p style={{ margin: 0, fontSize: 20 }}>{sourceText || '等待语音输入...'}</p>
         <p style={{ margin: '4px 0 0', fontSize: 18, color: '#4ec9b0' }}>
@@ -97,7 +120,6 @@ function App() {
         </p>
       </div>
 
-      {/* 历史记录 */}
       <div>
         <h3>翻译记录</h3>
         {records.length === 0 ? (

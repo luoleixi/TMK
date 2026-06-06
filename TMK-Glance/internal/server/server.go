@@ -1,13 +1,16 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
-	"tmk-glance/internal/language"
+	"tmk-glance/internal/asr"
+	"tmk-glance/internal/config"
 	"tmk-glance/internal/health"
+	"tmk-glance/internal/language"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -17,7 +20,9 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-func SetupRouter() *gin.Engine {
+func SetupRouter(cfg *config.Config) *gin.Engine {
+	asrCfg = cfg
+
 	r := gin.Default()
 
 	r.Use(corsMiddleware())
@@ -110,23 +115,89 @@ func handleInterpret(c *gin.Context) {
 	defer conn.Close()
 	log.Printf("[ws] client connected")
 
+	var (
+		asrEngine asr.ASR
+		asrCtx    context.Context
+		asrCancel context.CancelFunc = func() {}
+		audioCh   chan []byte
+	)
+	defer func() {
+		asrCancel()
+		if asrEngine != nil {
+			asrEngine.Close()
+		}
+	}()
+
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			asrCancel()
 			break
 		}
-		var wsMsg struct{ Type string }
+		var wsMsg struct {
+			Type       string `json:"type"`
+			SourceLang string `json:"source_lang"`
+			TargetLang string `json:"target_lang"`
+		}
 		json.Unmarshal(msg, &wsMsg)
 
 		switch wsMsg.Type {
 		case "start":
+			asrCtx, asrCancel = context.WithCancel(context.Background())
+			asrEngine = newASR(wsMsg.SourceLang)
+			audioCh = make(chan []byte, 8)
+
+			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
+			if err != nil {
+				conn.WriteJSON(gin.H{"type": "error", "message": err.Error()})
+				continue
+			}
+
 			conn.WriteJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
+
+			go func() {
+				for r := range resultCh {
+					conn.WriteJSON(gin.H{
+						"type":      "transcript",
+						"text":      r.Text,
+						"is_final":  r.IsFinal,
+						"timestamp": time.Now().UnixMilli(),
+					})
+				}
+			}()
+
+		case "audio":
+			if audioCh != nil {
+				audioCh <- msg
+			}
+
 		case "ping":
 			conn.WriteJSON(gin.H{"type": "pong", "timestamp_ms": time.Now().UnixMilli()})
+
 		case "stop":
+			asrCancel()
 			conn.WriteJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
 			return
 		}
+	}
+}
+
+// ---------- ASR factory ----------
+
+var asrCfg *config.Config
+
+func newASR(language string) asr.ASR {
+	switch asrCfg.ASR.Provider {
+	case "bailian":
+		key := asrCfg.ASR.Bailian.APIKey
+		if key == "" {
+			log.Fatal("[asr] DASHSCOPE_API_KEY required when asr.provider=bailian")
+		}
+		log.Println("[asr] using Bailian (DashScope)")
+		return asr.NewBailian(key, language)
+	default:
+		log.Println("[asr] using Mock")
+		return asr.NewMock()
 	}
 }
 

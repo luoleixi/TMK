@@ -1,13 +1,15 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
-	"tmk-glance/internal/language"
+	"tmk-glance/internal/asr"
 	"tmk-glance/internal/health"
+	"tmk-glance/internal/language"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -110,20 +112,67 @@ func handleInterpret(c *gin.Context) {
 	defer conn.Close()
 	log.Printf("[ws] client connected")
 
+	var (
+		asrEngine asr.ASR
+		asrCtx    context.Context
+		asrCancel context.CancelFunc = func() {}
+		audioCh   chan []byte
+	)
+	defer func() {
+		asrCancel()
+		if asrEngine != nil {
+			asrEngine.Close()
+		}
+	}()
+
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			asrCancel()
 			break
 		}
-		var wsMsg struct{ Type string }
+		var wsMsg struct {
+			Type       string `json:"type"`
+			SourceLang string `json:"source_lang"`
+			TargetLang string `json:"target_lang"`
+		}
 		json.Unmarshal(msg, &wsMsg)
 
 		switch wsMsg.Type {
 		case "start":
+			asrCtx, asrCancel = context.WithCancel(context.Background())
+			asrEngine = asr.NewMock()
+			audioCh = make(chan []byte, 8)
+
+			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
+			if err != nil {
+				conn.WriteJSON(gin.H{"type": "error", "message": err.Error()})
+				continue
+			}
+
 			conn.WriteJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
+
+			go func() {
+				for r := range resultCh {
+					conn.WriteJSON(gin.H{
+						"type":      "transcript",
+						"text":      r.Text,
+						"is_final":  r.IsFinal,
+						"timestamp": time.Now().UnixMilli(),
+					})
+				}
+			}()
+
+		case "audio":
+			if audioCh != nil {
+				audioCh <- msg
+			}
+
 		case "ping":
 			conn.WriteJSON(gin.H{"type": "pong", "timestamp_ms": time.Now().UnixMilli()})
+
 		case "stop":
+			asrCancel()
 			conn.WriteJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
 			return
 		}

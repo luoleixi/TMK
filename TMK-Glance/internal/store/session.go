@@ -2,6 +2,7 @@ package store
 
 import (
 	"sync"
+	"time"
 
 	"tmk-glance/internal/model"
 )
@@ -26,4 +27,17 @@ func (s *SessionStore) Get(id string) (*model.Session, bool) {
 	defer s.mu.RUnlock()
 	ses, ok := s.sessions[id]
 	return ses, ok
+}
+
+func (s *SessionStore) End(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ses, ok := s.sessions[id]
+	if !ok {
+		return false
+	}
+	now := time.Now()
+	ses.Status = "ended"
+	ses.EndedAt = &now
+	return true
 }

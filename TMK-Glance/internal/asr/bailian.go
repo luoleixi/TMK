@@ -3,116 +3,72 @@ package asr
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log"
-	"net"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
-const (
-	bailianTokenURL   = "https://dashscope.aliyuncs.com/api/v1/tokens"
-	bailianRealtimeWS = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
-)
-
-// ---------- Token ----------
-
-type tokenResp struct {
-	Token struct {
-		Token      string `json:"token"`
-		ExpireTime int64  `json:"expire_time"`
-	} `json:"token"`
-}
-
-func fetchToken(apiKey string) (string, error) {
-	req, _ := http.NewRequest(http.MethodPost, bailianTokenURL, nil)
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("fetch token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("fetch token: HTTP %d %s", resp.StatusCode, string(body))
-	}
-
-	var tr tokenResp
-	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
-		return "", fmt.Errorf("fetch token: %w", err)
-	}
-	if tr.Token.Token == "" {
-		return "", errors.New("fetch token: empty token in response")
-	}
-	return tr.Token.Token, nil
-}
-
-// ---------- Bailian ASR ----------
+const bailianWSURL = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 
 type bailianASR struct {
-	apiKey string
-	token  string
-	mu     sync.Mutex
+	apiKey   string
+	language string
+	conn     *websocket.Conn
+	mu       sync.RWMutex
 }
 
-func NewBailian(apiKey string) ASR {
-	return &bailianASR{apiKey: apiKey}
+func NewBailian(apiKey, language string) ASR {
+	if language == "" {
+		language = "zh"
+	}
+	return &bailianASR{apiKey: apiKey, language: language}
 }
 
 func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-chan Result, error) {
-	token, err := fetchToken(b.apiKey)
-	if err != nil {
-		return nil, err
+	header := http.Header{
+		"Authorization":              {fmt.Sprintf("Bearer %s", b.apiKey)},
+		"X-DashScope-DataInspection": {"enable"},
 	}
-	b.mu.Lock()
-	b.token = token
-	b.mu.Unlock()
 
-	wsURL := fmt.Sprintf("%s?token=%s", bailianRealtimeWS, token)
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, bailianWSURL, header)
 	if err != nil {
 		return nil, fmt.Errorf("ws dial: %w", err)
 	}
 	log.Printf("[asr:bailian] connected")
 
-	out := make(chan Result, 32)
-	taskID := fmt.Sprintf("tmk_%d", time.Now().UnixNano())
+	b.mu.Lock()
+	b.conn = conn
+	b.mu.Unlock()
 
-	// start transcription
-	startMsg := map[string]any{
-		"header": map[string]any{
-			"task_id": taskID,
-			"action":  "StartTranscription",
-		},
-		"payload": map[string]any{
-			"format":      "pcm",
-			"sample_rate": 16000,
-		},
-	}
-	if err := conn.WriteJSON(startMsg); err != nil {
+	taskID := uuid.New().String()
+
+	// send run-task
+	if err := b.sendRunTask(taskID); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("send StartTranscription: %w", err)
+		return nil, err
 	}
 
-	var wg sync.WaitGroup
+	// wait for task-started
+	if err := b.waitTaskStarted(conn, 10*time.Second); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	log.Printf("[asr:bailian] task started: %s", taskID)
 
-	// goroutine A: audioCh → WS binary frames
-	wg.Add(1)
+	out := make(chan Result, 32)
+
+	// audio sender
 	go func() {
-		defer wg.Done()
 		defer func() {
-			// send StopTranscription before closing write side
-			stopMsg := map[string]any{
-				"header": map[string]any{"task_id": taskID, "action": "StopTranscription"},
-			}
-			conn.WriteJSON(stopMsg)
+			b.sendFinishTask(taskID)
+			b.mu.Lock()
+			b.conn = nil
+			b.mu.Unlock()
 			conn.Close()
 			log.Printf("[asr:bailian] stopped")
 		}()
@@ -133,47 +89,146 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 		}
 	}()
 
-	// goroutine B: read WS → Result
-	wg.Add(1)
+	// result receiver
 	go func() {
-		defer wg.Done()
 		defer close(out)
 		for {
 			_, raw, err := conn.ReadMessage()
 			if err != nil {
-				if !errors.Is(err, net.ErrClosed) && ctx.Err() == nil {
+				if ctx.Err() == nil {
 					log.Printf("[asr:bailian] read: %v", err)
 				}
 				return
 			}
-			var resp struct {
-				Header  struct{ Event string `json:"event"` } `json:"header"`
+			var event struct {
+				Header struct {
+					Event        string `json:"event"`
+					ErrorCode    string `json:"error_code"`
+					ErrorMessage string `json:"error_message"`
+				} `json:"header"`
 				Payload struct {
-					Result  string `json:"result"`
-					IsFinal bool   `json:"is_final"`
+					Output struct {
+						Sentence struct {
+							Text    string `json:"text"`
+							EndTime *int64 `json:"end_time"`
+							BeginTime int64 `json:"begin_time"`
+							SentenceEnd bool `json:"sentence_end"`
+						} `json:"sentence"`
+					} `json:"output"`
 				} `json:"payload"`
 			}
-			if err := json.Unmarshal(raw, &resp); err != nil {
-				log.Printf("[asr:bailian] parse: %v", err)
+			if err := json.Unmarshal(raw, &event); err != nil {
 				continue
 			}
-			if resp.Header.Event == "TranscriptionResultChanged" {
-				select {
-				case out <- Result{Text: resp.Payload.Result, IsFinal: resp.Payload.IsFinal}:
-				case <-ctx.Done():
-					return
+
+			switch event.Header.Event {
+			case "result-generated":
+				text := event.Payload.Output.Sentence.Text
+				isFinal := event.Payload.Output.Sentence.SentenceEnd
+				if text != "" {
+					select {
+					case out <- Result{Text: text, IsFinal: isFinal}:
+					case <-ctx.Done():
+						return
+					}
 				}
+			case "task-finished":
+				log.Printf("[asr:bailian] task finished")
+				return
+			case "task-failed":
+				log.Printf("[asr:bailian] task failed: %s %s", event.Header.ErrorCode, event.Header.ErrorMessage)
+				return
 			}
 		}
-	}()
-
-	// cleanup goroutine
-	go func() {
-		wg.Wait()
-		conn.Close()
 	}()
 
 	return out, nil
 }
 
-func (b *bailianASR) Close() error { return nil }
+func (b *bailianASR) sendRunTask(taskID string) error {
+	msg := map[string]any{
+		"header": map[string]any{
+			"action":    "run-task",
+			"task_id":   taskID,
+			"streaming": "duplex",
+		},
+		"payload": map[string]any{
+			"task_group": "audio",
+			"task":       "asr",
+			"function":   "recognition",
+			"model":      "paraformer-realtime-v2",
+			"parameters": map[string]any{
+				"language":    b.language,
+				"sample_rate": 16000,
+				"format":      "pcm",
+			},
+			"input": map[string]any{},
+		},
+	}
+
+	b.mu.RLock()
+	conn := b.conn
+	b.mu.RUnlock()
+
+	return conn.WriteJSON(msg)
+}
+
+func (b *bailianASR) sendFinishTask(taskID string) {
+	msg := map[string]any{
+		"header": map[string]any{
+			"action":    "finish-task",
+			"task_id":   taskID,
+			"streaming": "duplex",
+		},
+		"payload": map[string]any{"input": map[string]any{}},
+	}
+
+	b.mu.RLock()
+	conn := b.conn
+	b.mu.RUnlock()
+
+	if conn != nil {
+		conn.WriteJSON(msg)
+	}
+}
+
+func (b *bailianASR) waitTaskStarted(conn *websocket.Conn, timeout time.Duration) error {
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-deadline:
+			return fmt.Errorf("timeout waiting for task-started")
+		default:
+		}
+
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return fmt.Errorf("read during start: %w", err)
+		}
+		var event struct {
+			Header struct {
+				Event        string `json:"event"`
+				ErrorCode    string `json:"error_code"`
+				ErrorMessage string `json:"error_message"`
+			} `json:"header"`
+		}
+		json.Unmarshal(raw, &event)
+
+		switch event.Header.Event {
+		case "task-started":
+			return nil
+		case "task-failed":
+			return fmt.Errorf("task-failed: %s %s", event.Header.ErrorCode, event.Header.ErrorMessage)
+		}
+	}
+}
+
+func (b *bailianASR) Close() error {
+	b.mu.RLock()
+	conn := b.conn
+	b.mu.RUnlock()
+	if conn != nil {
+		conn.Close()
+	}
+	return nil
+}

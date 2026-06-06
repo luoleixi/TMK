@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"tmk-glance/internal/asr"
+	"tmk-glance/internal/config"
 	"tmk-glance/internal/health"
 	"tmk-glance/internal/language"
 
@@ -20,7 +20,9 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-func SetupRouter() *gin.Engine {
+func SetupRouter(cfg *config.Config) *gin.Engine {
+	asrCfg = cfg
+
 	r := gin.Default()
 
 	r.Use(corsMiddleware())
@@ -142,7 +144,7 @@ func handleInterpret(c *gin.Context) {
 		switch wsMsg.Type {
 		case "start":
 			asrCtx, asrCancel = context.WithCancel(context.Background())
-			asrEngine = newASR()
+			asrEngine = newASR(wsMsg.SourceLang)
 			audioCh = make(chan []byte, 8)
 
 			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
@@ -182,15 +184,17 @@ func handleInterpret(c *gin.Context) {
 
 // ---------- ASR factory ----------
 
-func newASR() asr.ASR {
-	switch os.Getenv("ASR_PROVIDER") {
+var asrCfg *config.Config
+
+func newASR(language string) asr.ASR {
+	switch asrCfg.ASR.Provider {
 	case "bailian":
-		key := os.Getenv("DASHSCOPE_API_KEY")
+		key := asrCfg.ASR.Bailian.APIKey
 		if key == "" {
-			log.Fatal("[asr] DASHSCOPE_API_KEY required when ASR_PROVIDER=bailian")
+			log.Fatal("[asr] DASHSCOPE_API_KEY required when asr.provider=bailian")
 		}
 		log.Println("[asr] using Bailian (DashScope)")
-		return asr.NewBailian(key)
+		return asr.NewBailian(key, language)
 	default:
 		log.Println("[asr] using Mock")
 		return asr.NewMock()

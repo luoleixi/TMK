@@ -6,13 +6,19 @@ import (
 	"os"
 	"os/signal"
 
+	"tmk-glance/internal/config"
 	"tmk-glance/internal/server"
 )
 
 func main() {
-	router := server.SetupRouter()
+	cfg, err := config.Load("config.yaml")
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+
+	router := server.SetupRouter(cfg)
 	srv := &http.Server{
-		Addr:    ":8080",
+		Addr:    cfg.Server.Port,
 		Handler: router,
 	}
 

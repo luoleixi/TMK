@@ -11,14 +11,19 @@ import (
 	"tmk-glance/internal/config"
 	"tmk-glance/internal/health"
 	"tmk-glance/internal/language"
+	"tmk-glance/internal/model"
+	"tmk-glance/internal/store"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
+
+var sessionStore = store.NewSessionStore()
 
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	asrCfg = cfg
@@ -79,7 +84,34 @@ func handleAudioDevices(c *gin.Context) {
 // ---------- sessions ----------
 
 func handleCreateSession(c *gin.Context) {
-	c.JSON(201, gin.H{"message": "stub"})
+	var req struct {
+		SourceLang string `json:"source_lang"`
+		TargetLang string `json:"target_lang"`
+		InputType  string `json:"input_type"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": err.Error()})
+		return
+	}
+	if req.SourceLang == "" || req.TargetLang == "" {
+		c.JSON(400, gin.H{"code": 400, "message": "source_lang and target_lang are required"})
+		return
+	}
+	if req.InputType == "" {
+		req.InputType = "system_audio"
+	}
+
+	ses := &model.Session{
+		ID:         uuid.New().String(),
+		SourceLang: req.SourceLang,
+		TargetLang: req.TargetLang,
+		InputType:  req.InputType,
+		Status:     "active",
+		CreatedAt:  time.Now(),
+	}
+	sessionStore.Create(ses)
+
+	c.JSON(201, gin.H{"code": 0, "message": "ok", "data": ses})
 }
 
 func handleGetSession(c *gin.Context) {

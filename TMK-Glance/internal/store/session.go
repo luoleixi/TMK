@@ -20,3 +20,10 @@ func (s *SessionStore) Create(ses *model.Session) {
 	defer s.mu.Unlock()
 	s.sessions[ses.ID] = ses
 }
+
+func (s *SessionStore) Get(id string) (*model.Session, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ses, ok := s.sessions[id]
+	return ses, ok
+}

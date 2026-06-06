@@ -1,0 +1,7 @@
+server:
+  port: ":8080"
+
+asr:
+  provider: mock          # mock | bailian
+  bailian:
+    api_key: "sk-5bef3d3c64d549f5b0ddb0e4f105110e"

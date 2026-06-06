@@ -16,6 +16,12 @@ type Config struct {
 			APIKey string `yaml:"api_key"`
 		} `yaml:"bailian"`
 	} `yaml:"asr"`
+	Translator struct {
+		Provider string `yaml:"provider"`
+		Bailian  struct {
+			APIKey string `yaml:"api_key"`
+		} `yaml:"bailian"`
+	} `yaml:"translator"`
 }
 
 func Load(path string) (*Config, error) {
@@ -27,6 +33,7 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	cfg.Server.Port = ":8080"
 	cfg.ASR.Provider = "mock"
+	cfg.Translator.Provider = "mock"
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
@@ -34,9 +41,16 @@ func Load(path string) (*Config, error) {
 
 	if v := os.Getenv("DASHSCOPE_API_KEY"); v != "" {
 		cfg.ASR.Bailian.APIKey = v
+		cfg.Translator.Bailian.APIKey = v
 	}
 	if v := os.Getenv("ASR_PROVIDER"); v != "" {
 		cfg.ASR.Provider = v
+	}
+	if v := os.Getenv("TRANSLATOR_PROVIDER"); v != "" {
+		cfg.Translator.Provider = v
+	}
+	if cfg.Translator.Bailian.APIKey == "" {
+		cfg.Translator.Bailian.APIKey = cfg.ASR.Bailian.APIKey
 	}
 
 	return cfg, nil

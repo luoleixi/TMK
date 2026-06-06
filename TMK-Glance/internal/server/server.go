@@ -183,7 +183,13 @@ func handleInterpret(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
-	log.Printf("[ws] client connected")
+
+	sessionID := c.Query("session_id")
+	if _, ok := sessionStore.Get(sessionID); !ok {
+		conn.WriteJSON(gin.H{"type": "error", "message": "invalid session_id"})
+		return
+	}
+	log.Printf("[ws] client connected, session: %s", sessionID)
 
 	var (
 		asrEngine asr.ASR
@@ -243,6 +249,12 @@ func handleInterpret(c *gin.Context) {
 							"text":      translated,
 							"is_final":  true,
 							"timestamp": time.Now().UnixMilli(),
+						})
+						sessionStore.AddRecord(sessionID, model.Record{
+							SessionID:      sessionID,
+							SourceText:     r.Text,
+							TranslatedText: translated,
+							Timestamp:      time.Now(),
 						})
 					}
 				}

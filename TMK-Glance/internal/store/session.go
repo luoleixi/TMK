@@ -34,15 +34,39 @@ func (s *SessionStore) Get(id string) (*model.Session, bool) {
 	return ses, ok
 }
 
+func (s *SessionStore) Activate(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ses, ok := s.sessions[id]
+	if !ok || ses.Status != "ready" {
+		return false
+	}
+	ses.Status = "active"
+	return true
+}
+
 func (s *SessionStore) End(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ses, ok := s.sessions[id]
-	if !ok {
+	if !ok || ses.Status != "active" {
 		return false
 	}
 	now := time.Now()
-	ses.Status = "ended"
+	ses.Status = "completed"
+	ses.EndedAt = &now
+	return true
+}
+
+func (s *SessionStore) Fail(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ses, ok := s.sessions[id]
+	if !ok || ses.Status != "active" {
+		return false
+	}
+	now := time.Now()
+	ses.Status = "error"
 	ses.EndedAt = &now
 	return true
 }

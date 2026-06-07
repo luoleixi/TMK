@@ -6,6 +6,8 @@ import (
 	"changeme/internal/audio"
 )
 
+const deviceSystemAudio = -2 // sentinel device ID for WASAPI loopback
+
 var (
 	captureSvc *CaptureService
 	sessionSvc *SessionService
@@ -13,31 +15,34 @@ var (
 
 type CaptureService struct {
 	capture     interface{ Stop() }
-	micDeviceID int // device ID for microphone mode, -1 = default
+	micDeviceID int // -2=system audio, -1=default mic, >=0=specific mic
 }
 
 func NewCaptureService() *CaptureService {
-	return &CaptureService{micDeviceID: -1}
+	return &CaptureService{micDeviceID: deviceSystemAudio}
 }
 
-// SetMicrophoneDevice sets the microphone device ID to use.
-// Call before StartCapture with sourceType="microphone".
+// SetMicrophoneDevice sets the capture device ID.
+// Use -2 for system audio (WASAPI loopback), -1 for default mic, or specific device ID.
 func (s *CaptureService) SetMicrophoneDevice(deviceID int) {
 	s.micDeviceID = deviceID
-	log.Printf("[capture] microphone device set to %d", deviceID)
+	log.Printf("[capture] device set to %d", deviceID)
 }
 
-// ListCaptureDevices returns all available waveIn devices.
-// The first entry is the system default (WAVE_MAPPER).
+// ListCaptureDevices returns all available capture sources.
+// First entry is system audio (WASAPI loopback), followed by microphone devices.
 func (s *CaptureService) ListCaptureDevices() []audio.Device {
+	sysAudio := audio.Device{ID: deviceSystemAudio, Name: "系统音频 (WASAPI Loopback)", Type: "system_audio"}
 	def := audio.DefaultDevice()
 	def.Name = "默认设备 (" + def.Name + ")"
 	devices := audio.ListDevices()
-	return append([]audio.Device{def}, devices...)
+	result := make([]audio.Device, 0, len(devices)+2)
+	result = append(result, sysAudio, def)
+	return append(result, devices...)
 }
 
-// StartCapture begins audio capture for the given source type.
-// sourceType: "system_audio" → WASAPI loopback, "microphone" → default mic
+// StartCapture begins audio capture.
+// Uses micDeviceID set via SetMicrophoneDevice to determine the source.
 func (s *CaptureService) StartCapture(sourceType string) error {
 	if s.capture != nil {
 		s.StopCapture()
@@ -63,7 +68,7 @@ func (s *CaptureService) StartCapture(sourceType string) error {
 		}
 	}
 
-	if sourceType == "system_audio" {
+	if s.micDeviceID == deviceSystemAudio {
 		c, err := audio.StartLoopbackCapture(onData)
 		if err != nil {
 			return err
@@ -73,7 +78,6 @@ func (s *CaptureService) StartCapture(sourceType string) error {
 		return nil
 	}
 
-	// microphone: use winmm via StartCapture
 	deviceID := s.micDeviceID
 	if deviceID < 0 {
 		deviceID = audio.DefaultDevice().ID

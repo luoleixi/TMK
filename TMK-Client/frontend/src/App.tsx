@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { SessionService, CaptureService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
 
@@ -13,11 +13,6 @@ const LANGUAGES = [
   { code: 'ru', name: 'Русский' },
 ];
 
-const INPUT_TYPES = [
-  { value: 'system_audio', label: '系统音频' },
-  { value: 'microphone', label: '麦克风' },
-];
-
 type RecordEntry = {
   id: number;
   sourceText: string;
@@ -30,17 +25,19 @@ type DeviceInfo = {
   type: string;
 };
 
+const DEVICE_SYSTEM_AUDIO = -2;
+
 function App() {
   const [sourceLang, setSourceLang] = useState('zh');
   const [targetLang, setTargetLang] = useState('en');
-  const [inputType, setInputType] = useState('system_audio');
   const [running, setRunning] = useState(false);
   const [sourceText, setSourceText] = useState('');
   const [translatedText, setTranslatedText] = useState('');
   const [records, setRecords] = useState<RecordEntry[]>([]);
   const [status, setStatus] = useState('就绪');
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
-  const [micDeviceID, setMicDeviceID] = useState(-1);
+  const [selectedDevice, setSelectedDevice] = useState(DEVICE_SYSTEM_AUDIO);
+  const transitioning = useRef(false);
 
   useEffect(() => {
     Events.On('transcript', (event: any) => {
@@ -63,6 +60,8 @@ function App() {
   }, []);
 
   const handleToggle = async () => {
+    if (transitioning.current) return;
+    transitioning.current = true;
     if (running) {
       setStatus('停止中...');
       CaptureService.StopCapture();
@@ -72,6 +71,7 @@ function App() {
     } else {
       setStatus('创建会话中...');
       try {
+        const inputType = selectedDevice === DEVICE_SYSTEM_AUDIO ? 'system_audio' : 'microphone';
         await SessionService.CreateSession(sourceLang, targetLang, inputType);
         await SessionService.StartInterpret();
         await CaptureService.StartCapture(inputType);
@@ -81,10 +81,11 @@ function App() {
         setStatus('连接失败: ' + e.message);
       }
     }
+    transitioning.current = false;
   };
 
   const handleDeviceChange = async (deviceID: number) => {
-    setMicDeviceID(deviceID);
+    setSelectedDevice(deviceID);
     await CaptureService.SetMicrophoneDevice(deviceID);
   };
 
@@ -110,29 +111,16 @@ function App() {
       </div>
 
       <div style={{ marginBottom: 16 }}>
-        <span style={{ marginRight: 16 }}>音频来源：</span>
-        {INPUT_TYPES.map(t => (
-          <label key={t.value} style={{ marginRight: 12 }}>
-            <input type="radio" value={t.value} checked={inputType === t.value}
-              onChange={e => setInputType(e.target.value)} />
-            {t.label}
-          </label>
-        ))}
+        <label>
+          音频来源
+          <select value={selectedDevice} onChange={e => handleDeviceChange(Number(e.target.value))}
+            style={{ width: '100%', padding: 8, marginTop: 4 }}>
+            {devices.map(d => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+        </label>
       </div>
-
-      {inputType === 'microphone' && devices.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <label>
-            录音设备：
-            <select value={micDeviceID} onChange={e => handleDeviceChange(Number(e.target.value))}
-              style={{ width: '100%', padding: 8, marginTop: 4 }}>
-              {devices.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      )}
 
       <div style={{ textAlign: 'center', marginBottom: 16 }}>
         <button onClick={handleToggle}

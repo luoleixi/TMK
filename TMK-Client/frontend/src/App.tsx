@@ -101,13 +101,15 @@ function App() {
   const handleStart = async () => {
     if (transitioning.current) return;
     transitioning.current = true;
-    setStatus('创建会话中...');
     try {
       lastSourceRef.current = '';
-      if (!sessionIdRef.current) {
+      if (paused) {
+        await (SessionService as any).ResumeInterpret();
+      } else {
+        setStatus('创建会话中...');
         sessionIdRef.current = await SessionService.CreateSession(sourceLang, targetLang, inputType());
+        await SessionService.StartInterpret();
       }
-      await SessionService.StartInterpret();
       await CaptureService.StartCapture(inputType());
       setStatus('翻译中...');
       setRunning(true);

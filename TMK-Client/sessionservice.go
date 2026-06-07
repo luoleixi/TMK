@@ -17,10 +17,11 @@ import (
 const backendURL = "http://localhost:8080/api/v1"
 
 type SessionService struct {
-	mu       sync.Mutex
-	conn     *websocket.Conn
-	running  bool
-	sessionID string
+	mu              sync.Mutex
+	conn            *websocket.Conn
+	running         bool
+	sessionID       string
+	subtitleWindow  application.Window
 }
 
 type TranscriptMsg struct {
@@ -33,6 +34,11 @@ type TranslationMsg struct {
 	Text    string `json:"text"`
 	IsFinal bool   `json:"is_final"`
 	Timestamp int64 `json:"timestamp"`
+}
+
+// SetSubtitleWindow sets the subtitle window reference for show/hide control
+func (s *SessionService) SetSubtitleWindow(w application.Window) {
+	s.subtitleWindow = w
 }
 
 // CreateSession creates a new translation session on the backend
@@ -88,6 +94,10 @@ func (s *SessionService) StartInterpret() error {
 	s.conn = conn
 	s.running = true
 	s.mu.Unlock()
+
+	if s.subtitleWindow != nil {
+		s.subtitleWindow.Show()
+	}
 
 	log.Printf("[ws] connected, session: %s", sessionID)
 

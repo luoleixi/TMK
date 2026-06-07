@@ -39,7 +39,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "TMK-Client",
 		Description: "A demo of using raw HTML & CSS",
-	Services: []application.Service{
+		Services: []application.Service{
 			application.NewService(sessionSvc),
 			application.NewService(captureSvc),
 		},
@@ -51,13 +51,9 @@ func main() {
 		},
 	})
 
-	// Create a new window with the necessary options.
-	// 'Title' is the title of the window.
-	// 'Mac' options tailor the window when running on macOS.
-	// 'BackgroundColour' is the background colour of the window.
-	// 'URL' is the URL that will be loaded into the webview.
+	// -- main window --
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Window 1",
+		Title: "TMK",
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			Backdrop:                application.MacBackdropTranslucent,
@@ -66,6 +62,21 @@ func main() {
 		BackgroundColour: application.NewRGB(27, 38, 54),
 		URL:              "/",
 	})
+
+	// -- subtitle window (hidden, always-on-top, frameless) --
+	subtitleWin := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:              "subtitle",
+		Width:             600,
+		Height:            80,
+		AlwaysOnTop:       true,
+		Frameless:         true,
+		DisableResize:     true,
+		BackgroundType:    application.BackgroundTypeTransparent,
+		Hidden:            true,
+		URL:               "/?mode=subtitle",
+		IgnoreMouseEvents: true,
+	})
+	sessionSvc.SetSubtitleWindow(subtitleWin)
 
 	// Create a goroutine that emits an event containing the current time every second.
 	// The frontend can listen to this event and update the UI accordingly.

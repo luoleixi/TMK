@@ -99,7 +99,6 @@ func (s *SessionService) StartInterpret() error {
 			s.mu.Lock()
 			s.running = false
 			s.mu.Unlock()
-			conn.Close()
 			log.Printf("[ws] disconnected")
 		}()
 
@@ -147,14 +146,15 @@ func (s *SessionService) SendAudio(data []byte) error {
 // StopInterpret ends the translation session
 func (s *SessionService) StopInterpret() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.conn != nil {
-		s.conn.WriteJSON(map[string]string{"type": "stop"})
-		time.Sleep(100 * time.Millisecond)
-		s.conn.Close()
-		s.conn = nil
-	}
+	conn := s.conn
+	s.conn = nil
 	s.running = false
+	s.mu.Unlock()
+
+	if conn != nil {
+		conn.WriteJSON(map[string]string{"type": "stop"})
+		time.Sleep(100 * time.Millisecond)
+		conn.Close()
+	}
 	return nil
 }

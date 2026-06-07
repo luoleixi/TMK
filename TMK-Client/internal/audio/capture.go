@@ -178,7 +178,6 @@ func waveInProc(hwi, uMsg, dwInstance, dwParam1, dwParam2 uintptr) uintptr {
 		log.Printf("[audio] WIM_DATA with 0 bytes recorded — device may be silent or not capturing")
 	}
 
-	// re-add buffer (already prepared, no need to re-prepare)
 	procWaveInAddBuffer.Call(c.waveIn, uintptr(unsafe.Pointer(hdr)), uintptr(unsafe.Sizeof(*hdr)))
 	return 0
 }

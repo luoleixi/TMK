@@ -37,4 +37,7 @@ func main() {
 	if err := srv.Close(); err != nil {
 		log.Fatalf("shutdown: %s\n", err)
 	}
+	if s := server.GetSessionStore(); s != nil {
+		s.Close()
+	}
 }

@@ -19,18 +19,22 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	_ "modernc.org/sqlite"
 )
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-var sessionStore = store.NewSessionStore()
+var sessionStore *store.SessionStore
 var translateSvc translator.Translator
+
+func GetSessionStore() *store.SessionStore { return sessionStore }
 
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	asrCfg = cfg
 	translateSvc = newTranslator(cfg)
+	sessionStore = store.NewSessionStore("./data")
 
 	r := gin.Default()
 
@@ -145,6 +149,7 @@ func handleGetRecords(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": recs})
 }
 
+
 // ---------- translate ----------
 
 func handleTranslate(c *gin.Context) {
@@ -168,11 +173,24 @@ func handleTranslate(c *gin.Context) {
 // ---------- history ----------
 
 func handleListHistory(c *gin.Context) {
-	c.JSON(200, gin.H{"message": "stub"})
+	sessions := sessionStore.ListHistory()
+	if sessions == nil {
+		sessions = []model.Session{}
+	}
+	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": sessions})
 }
 
 func handleGetHistory(c *gin.Context) {
-	c.JSON(200, gin.H{"message": "stub"})
+	ses, ok := sessionStore.Get(c.Param("id"))
+	if !ok {
+		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
+		return
+	}
+	recs, _ := sessionStore.Records(ses.ID)
+	if recs == nil {
+		recs = []model.Record{}
+	}
+	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"session": ses, "records": recs}})
 }
 
 // ---------- WebSocket ----------
@@ -191,6 +209,9 @@ func handleInterpret(c *gin.Context) {
 		return
 	}
 	log.Printf("[ws] client connected, session: %s", sessionID)
+
+	// End session when this handler returns (client disconnects)
+	defer sessionStore.End(sessionID)
 
 	var (
 		asrEngine asr.ASR

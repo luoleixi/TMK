@@ -48,6 +48,7 @@ function App() {
   const [sourceLang, setSourceLang] = useState('zh');
   const [targetLang, setTargetLang] = useState('en');
   const [running, setRunning] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [sourceText, setSourceText] = useState('');
   const [translatedText, setTranslatedText] = useState('');
   const [records, setRecords] = useState<RecordEntry[]>([]);
@@ -55,6 +56,7 @@ function App() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState(DEVICE_SYSTEM_AUDIO);
   const transitioning = useRef(false);
+  const sessionIdRef = useRef('');
   const sourceTextRef = useRef('');
   const lastSourceRef = useRef('');
 
@@ -94,29 +96,48 @@ function App() {
 
   // ---- live translate ----
 
-  const handleToggle = async () => {
+  const inputType = () => selectedDevice === DEVICE_SYSTEM_AUDIO ? 'system_audio' : 'microphone';
+
+  const handleStart = async () => {
     if (transitioning.current) return;
     transitioning.current = true;
-    if (running) {
-      setStatus('停止中...');
-      CaptureService.StopCapture();
-      await SessionService.StopInterpret();
-      setStatus('已停止');
-      setRunning(false);
-    } else {
-      setStatus('创建会话中...');
-      try {
-        const inputType = selectedDevice === DEVICE_SYSTEM_AUDIO ? 'system_audio' : 'microphone';
-        lastSourceRef.current = '';
-        await SessionService.CreateSession(sourceLang, targetLang, inputType);
-        await SessionService.StartInterpret();
-        await CaptureService.StartCapture(inputType);
-        setStatus('翻译中...');
-        setRunning(true);
-      } catch (e: any) {
-        setStatus('连接失败: ' + e.message);
+    setStatus('创建会话中...');
+    try {
+      lastSourceRef.current = '';
+      if (!sessionIdRef.current) {
+        sessionIdRef.current = await SessionService.CreateSession(sourceLang, targetLang, inputType());
       }
+      await SessionService.StartInterpret();
+      await CaptureService.StartCapture(inputType());
+      setStatus('翻译中...');
+      setRunning(true);
+      setPaused(false);
+    } catch (e: any) {
+      setStatus('连接失败: ' + e.message);
     }
+    transitioning.current = false;
+  };
+
+  const handlePause = async () => {
+    if (transitioning.current) return;
+    transitioning.current = true;
+    CaptureService.StopCapture();
+    await (SessionService as any).PauseInterpret();
+    setStatus('已暂停');
+    setPaused(true);
+    transitioning.current = false;
+  };
+
+  const handleStop = async () => {
+    if (transitioning.current) return;
+    transitioning.current = true;
+    setStatus('停止中...');
+    CaptureService.StopCapture();
+    await SessionService.StopInterpret();
+    sessionIdRef.current = '';
+    setStatus('已停止');
+    setRunning(false);
+    setPaused(false);
     transitioning.current = false;
   };
 
@@ -223,14 +244,56 @@ function App() {
           </div>
 
           <div style={{ textAlign: 'center', marginBottom: 16 }}>
-            <button onClick={handleToggle}
-              style={{
-                padding: '12px 48px', fontSize: 18, cursor: 'pointer',
-                background: running ? '#e74c3c' : '#2ecc71', color: '#fff',
-                border: 'none', borderRadius: 8,
-              }}>
-              {running ? '停止翻译' : '开始翻译'}
-            </button>
+            {!running && !paused ? (
+              <button onClick={handleStart}
+                style={{
+                  padding: '12px 48px', fontSize: 18, cursor: 'pointer',
+                  background: '#2ecc71', color: '#fff', border: 'none', borderRadius: 8,
+                }}>
+                开始翻译
+              </button>
+            ) : null}
+
+            {running && !paused ? (
+              <>
+                <button onClick={handlePause}
+                  style={{
+                    padding: '12px 48px', fontSize: 18, cursor: 'pointer',
+                    background: '#f39c12', color: '#fff', border: 'none', borderRadius: 8,
+                    marginRight: 16,
+                  }}>
+                  暂停
+                </button>
+                <button onClick={handleStop}
+                  style={{
+                    padding: '12px 48px', fontSize: 18, cursor: 'pointer',
+                    background: '#e74c3c', color: '#fff', border: 'none', borderRadius: 8,
+                  }}>
+                  停止
+                </button>
+              </>
+            ) : null}
+
+            {paused ? (
+              <>
+                <button onClick={handleStart}
+                  style={{
+                    padding: '12px 48px', fontSize: 18, cursor: 'pointer',
+                    background: '#2ecc71', color: '#fff', border: 'none', borderRadius: 8,
+                    marginRight: 16,
+                  }}>
+                  继续
+                </button>
+                <button onClick={handleStop}
+                  style={{
+                    padding: '12px 48px', fontSize: 18, cursor: 'pointer',
+                    background: '#e74c3c', color: '#fff', border: 'none', borderRadius: 8,
+                  }}>
+                  停止
+                </button>
+              </>
+            ) : null}
+
             <p style={{ color: '#888', marginTop: 8 }}>{status}</p>
           </div>
 

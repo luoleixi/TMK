@@ -160,6 +160,28 @@ func (s *SessionService) StopInterpret() error {
 	return nil
 }
 
+// PauseInterpret pauses the current interpret session without closing the connection
+func (s *SessionService) PauseInterpret() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conn == nil || !s.running {
+		return fmt.Errorf("not connected")
+	}
+	s.running = false
+	return s.conn.WriteJSON(map[string]string{"type": "pause"})
+}
+
+// ResumeInterpret resumes a paused interpret session
+func (s *SessionService) ResumeInterpret() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conn == nil || s.running {
+		return fmt.Errorf("not paused or not connected")
+	}
+	s.running = true
+	return s.conn.WriteJSON(map[string]string{"type": "resume"})
+}
+
 // ---------- history ----------
 
 type HistorySession struct {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"strings"
 
 	"changeme/internal/audio"
 )
@@ -13,39 +12,18 @@ var (
 )
 
 type CaptureService struct {
-	capture *audio.Capture
+	capture interface{ Stop() }
 }
 
 // StartCapture begins audio capture for the given source type.
-// sourceType: "system_audio" → Stereo Mix, "microphone" → default mic
+// sourceType: "system_audio" → WASAPI loopback, "microphone" → default mic
 func (s *CaptureService) StartCapture(sourceType string) error {
 	if s.capture != nil {
 		s.StopCapture()
 	}
 
-	// map sourceType to device
-	deviceID := audio.DefaultDevice().ID
-	if strings.EqualFold(sourceType, "system_audio") {
-		for _, d := range audio.ListDevices() {
-			name := strings.ToLower(d.Name)
-			if strings.Contains(name, "stereo") || strings.Contains(name, "mix") ||
-				strings.Contains(name, "立体声") || strings.Contains(name, "混音") ||
-				strings.Contains(name, "loopback") || strings.Contains(name, "wave out") {
-				deviceID = d.ID
-				log.Printf("[capture] found Stereo Mix: %s (id=%d)", d.Name, deviceID)
-				break
-			}
-		}
-		if deviceID == audio.DefaultDevice().ID {
-			log.Printf("[capture] Stereo Mix not found, falling back to default device. Available devices:")
-			for _, d := range audio.ListDevices() {
-				log.Printf("[capture]   device %d: %s", d.ID, d.Name)
-			}
-		}
-	}
-
 	var count int
-	c, err := audio.StartCapture(deviceID, func(pcm []byte) {
+	onData := func(pcm []byte) {
 		count++
 		if count == 1 {
 			log.Printf("[capture] first audio chunk received: %d bytes", len(pcm))
@@ -60,12 +38,27 @@ func (s *CaptureService) StartCapture(sourceType string) error {
 		} else {
 			log.Printf("[capture] sessionSvc is nil!")
 		}
-	})
+	}
+
+	if sourceType == "system_audio" {
+		c, err := audio.StartLoopbackCapture(onData)
+		if err != nil {
+			return err
+		}
+		s.capture = c
+		log.Printf("[capture] started, source=system_audio (WASAPI loopback)")
+		return nil
+	}
+
+	// microphone: use winmm via StartCapture
+	deviceID := audio.DefaultDevice().ID
+	var err error
+	c, err := audio.StartCapture(deviceID, onData)
 	if err != nil {
 		return err
 	}
 	s.capture = c
-	log.Printf("[capture] started, source=%s device=%d", sourceType, deviceID)
+	log.Printf("[capture] started, source=microphone device=%d", deviceID)
 	return nil
 }
 

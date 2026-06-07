@@ -142,6 +142,7 @@ func (c *Capture) Stop() {
 	procWaveInStop.Call(c.waveIn)
 	procWaveInReset.Call(c.waveIn)
 
+	// Wait for in-flight callbacks to see running=false and return.
 	time.Sleep(50 * time.Millisecond)
 
 	c.mu.Lock()

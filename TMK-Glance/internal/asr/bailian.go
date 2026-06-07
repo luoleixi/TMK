@@ -73,6 +73,7 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 			log.Printf("[asr:bailian] stopped")
 		}()
 
+		var bcnt int
 		for {
 			select {
 			case <-ctx.Done():
@@ -81,8 +82,12 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 				if !ok {
 					return
 				}
+				bcnt++
+				if bcnt%50 == 1 {
+					log.Printf("[asr:bailian] sent %d audio chunks to Bailian", bcnt)
+				}
 				if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
-					log.Printf("[asr:bailian] write audio: %v", err)
+					log.Printf("[asr:bailian] write audio error: %v", err)
 					return
 				}
 			}

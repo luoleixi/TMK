@@ -20,11 +20,18 @@ func (s *CaptureService) StartCapture(deviceID int) error {
 		s.StopCapture()
 	}
 
+	var count int
 	c, err := audio.StartCapture(deviceID, func(pcm []byte) {
+		count++
+		if count%50 == 1 {
+			log.Printf("[capture] sent %d chunks (%d bytes each)", count, len(pcm))
+		}
 		if sessionSvc != nil {
 			if err := sessionSvc.SendAudio(pcm); err != nil {
-				log.Printf("[capture] send audio: %v", err)
+				log.Printf("[capture] send error: %v", err)
 			}
+		} else {
+			log.Printf("[capture] sessionSvc is nil!")
 		}
 	})
 	if err != nil {

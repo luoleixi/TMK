@@ -61,8 +61,8 @@ function App() {
       setStatus('创建会话中...');
       try {
         await SessionService.CreateSession(sourceLang, targetLang, inputType);
-        await CaptureService.StartCapture(-1);
         await SessionService.StartInterpret();
+        await CaptureService.StartCapture(-1);
         setStatus('翻译中...');
         setRunning(true);
       } catch (e: any) {

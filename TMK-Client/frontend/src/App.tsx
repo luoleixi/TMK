@@ -62,7 +62,7 @@ function App() {
       try {
         await SessionService.CreateSession(sourceLang, targetLang, inputType);
         await SessionService.StartInterpret();
-        await CaptureService.StartCapture(-1);
+        await CaptureService.StartCapture(inputType);
         setStatus('翻译中...');
         setRunning(true);
       } catch (e: any) {

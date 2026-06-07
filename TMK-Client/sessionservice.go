@@ -84,6 +84,19 @@ func (s *SessionService) StartInterpret() error {
 		return fmt.Errorf("no active session")
 	}
 
+	// Close existing connection if already running
+	s.mu.Lock()
+	if s.conn != nil {
+		old := s.conn
+		s.conn = nil
+		s.running = false
+		s.mu.Unlock()
+		old.WriteJSON(map[string]string{"type": "stop"})
+		old.Close()
+	} else {
+		s.mu.Unlock()
+	}
+
 	url := fmt.Sprintf("ws://localhost:8080/api/v1/interpret?session_id=%s", sessionID)
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {

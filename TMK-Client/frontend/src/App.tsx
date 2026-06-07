@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { SessionService, CaptureService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
 
-const BACKEND = 'http://localhost:8080/api/v1';
+const BACKEND = 'http://117.72.159.185:8080/api/v1';
 
 const LANGUAGES = [
   { code: 'zh', name: '中文' },

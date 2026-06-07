@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -131,17 +132,24 @@ func StartCapture(deviceID int, cb OnData) (*Capture, error) {
 
 func (c *Capture) Stop() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if !c.running {
+		c.mu.Unlock()
 		return
 	}
 	c.running = false
+	c.mu.Unlock()
+
 	procWaveInStop.Call(c.waveIn)
 	procWaveInReset.Call(c.waveIn)
+
+	time.Sleep(50 * time.Millisecond)
+
+	c.mu.Lock()
 	for i := range c.headers {
 		procWaveInUnprepareHdr.Call(c.waveIn, uintptr(unsafe.Pointer(&c.headers[i])), uintptr(unsafe.Sizeof(c.headers[i])))
 	}
 	procWaveInClose.Call(c.waveIn)
+	c.mu.Unlock()
 	log.Printf("[audio] capture stopped")
 }
 
@@ -157,17 +165,18 @@ func waveInProc(hwi, uMsg, dwInstance, dwParam1, dwParam2 uintptr) uintptr {
 	c := (*Capture)(unsafe.Pointer(dwInstance))
 	hdr := (*waveHdr)(unsafe.Pointer(dwParam1))
 
-	if hdr.dwBytesRecorded > 0 && c.running {
+	if !c.running {
+		return 0
+	}
+
+	if hdr.dwBytesRecorded > 0 {
 		data := make([]byte, hdr.dwBytesRecorded)
 		copy(data, unsafe.Slice((*byte)(unsafe.Pointer(hdr.lpData)), hdr.dwBytesRecorded))
 		c.callback(data)
-	} else if hdr.dwBytesRecorded == 0 && c.running {
+	} else {
 		log.Printf("[audio] WIM_DATA with 0 bytes recorded — device may be silent or not capturing")
-	} else if !c.running {
-		log.Printf("[audio] WIM_DATA received but capture is stopped, dropping %d bytes", hdr.dwBytesRecorded)
 	}
 
-	// re-add buffer (already prepared, no need to re-prepare)
 	procWaveInAddBuffer.Call(c.waveIn, uintptr(unsafe.Pointer(hdr)), uintptr(unsafe.Sizeof(*hdr)))
 	return 0
 }

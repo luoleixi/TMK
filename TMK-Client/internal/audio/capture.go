@@ -163,8 +163,7 @@ func waveInProc(hwi, uMsg, dwInstance, dwParam1, dwParam2 uintptr) uintptr {
 		c.callback(data)
 	}
 
-	// re-add the buffer
-	procWaveInPrepareHdr.Call(c.waveIn, uintptr(unsafe.Pointer(hdr)), uintptr(unsafe.Sizeof(*hdr)))
+	// re-add buffer (already prepared, no need to re-prepare)
 	procWaveInAddBuffer.Call(c.waveIn, uintptr(unsafe.Pointer(hdr)), uintptr(unsafe.Sizeof(*hdr)))
 	return 0
 }

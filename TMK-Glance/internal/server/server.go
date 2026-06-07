@@ -196,6 +196,7 @@ func handleInterpret(c *gin.Context) {
 		asrCtx    context.Context
 		asrCancel context.CancelFunc = func() {}
 		audioCh   chan []byte
+		cnt       int
 	)
 	defer func() {
 		asrCancel()
@@ -205,10 +206,21 @@ func handleInterpret(c *gin.Context) {
 	}()
 
 	for {
-		_, msg, err := conn.ReadMessage()
+		msgType, msg, err := conn.ReadMessage()
 		if err != nil {
 			asrCancel()
 			break
+		}
+		// binary = raw PCM audio
+		if msgType == websocket.BinaryMessage {
+			if audioCh != nil {
+				audioCh <- msg
+				cnt++
+				if cnt%50 == 1 {
+					log.Printf("[ws] received %d audio chunks", cnt)
+				}
+			}
+			continue
 		}
 		var wsMsg struct {
 			Type       string `json:"type"`
@@ -266,6 +278,10 @@ func handleInterpret(c *gin.Context) {
 		case "audio":
 			if audioCh != nil {
 				audioCh <- msg
+				cnt++
+				if cnt%50 == 1 {
+					log.Printf("[ws] received %d audio chunks", cnt)
+				}
 			}
 
 		case "ping":

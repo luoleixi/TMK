@@ -24,6 +24,12 @@ type RecordEntry = {
   translatedText: string;
 };
 
+type DeviceInfo = {
+  id: number;
+  name: string;
+  type: string;
+};
+
 function App() {
   const [sourceLang, setSourceLang] = useState('zh');
   const [targetLang, setTargetLang] = useState('en');
@@ -33,6 +39,8 @@ function App() {
   const [translatedText, setTranslatedText] = useState('');
   const [records, setRecords] = useState<RecordEntry[]>([]);
   const [status, setStatus] = useState('就绪');
+  const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [micDeviceID, setMicDeviceID] = useState(-1);
   const transitioning = useRef(false);
 
   useEffect(() => {
@@ -48,6 +56,10 @@ function App() {
           translatedText: event.data.text,
         }]);
       }
+    });
+
+    CaptureService.ListCaptureDevices().then((list: DeviceInfo[]) => {
+      setDevices(list);
     });
   }, []);
 
@@ -73,6 +85,11 @@ function App() {
       }
     }
     transitioning.current = false;
+  };
+
+  const handleDeviceChange = async (deviceID: number) => {
+    setMicDeviceID(deviceID);
+    await CaptureService.SetMicrophoneDevice(deviceID);
   };
 
   return (
@@ -106,6 +123,20 @@ function App() {
           </label>
         ))}
       </div>
+
+      {inputType === 'microphone' && devices.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <label>
+            录音设备：
+            <select value={micDeviceID} onChange={e => handleDeviceChange(Number(e.target.value))}
+              style={{ width: '100%', padding: 8, marginTop: 4 }}>
+              {devices.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
 
       <div style={{ textAlign: 'center', marginBottom: 16 }}>
         <button onClick={handleToggle}

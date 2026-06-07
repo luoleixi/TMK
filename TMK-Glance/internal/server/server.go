@@ -44,8 +44,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		v1.GET("/audio/devices", handleAudioDevices)
 		v1.POST("/sessions", handleCreateSession)
 		v1.GET("/sessions/:id", handleGetSession)
-		v1.DELETE("/sessions/:id", handleDeleteSession)
-		v1.GET("/sessions/:id/records", handleGetRecords)
+		v1.POST("/sessions/:id/stop", handleStopSession)
+
 		v1.GET("/history", handleListHistory)
 		v1.GET("/history/:id", handleGetHistory)
 		v1.POST("/translate", handleTranslate)
@@ -128,21 +128,12 @@ func handleGetSession(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": ses})
 }
 
-func handleDeleteSession(c *gin.Context) {
+func handleStopSession(c *gin.Context) {
 	if !sessionStore.End(c.Param("id")) {
 		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "message": "ok"})
-}
-
-func handleGetRecords(c *gin.Context) {
-	recs, ok := sessionStore.Records(c.Param("id"))
-	if !ok {
-		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
-		return
-	}
-	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": recs})
 }
 
 // ---------- translate ----------

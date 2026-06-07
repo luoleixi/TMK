@@ -111,7 +111,7 @@ func handleCreateSession(c *gin.Context) {
 		SourceLang: req.SourceLang,
 		TargetLang: req.TargetLang,
 		InputType:  req.InputType,
-		Status:     "active",
+		Status:     "ready",
 		CreatedAt:  time.Now(),
 	}
 	sessionStore.Create(ses)
@@ -192,6 +192,9 @@ func handleInterpret(c *gin.Context) {
 	}
 	log.Printf("[ws] client connected, session: %s", sessionID)
 
+	// Mark session completed when handler returns.
+	defer sessionStore.End(sessionID)
+
 	var (
 		asrEngine asr.ASR
 		asrCtx    context.Context
@@ -238,6 +241,10 @@ func handleInterpret(c *gin.Context) {
 
 		switch wsMsg.Type {
 		case "start":
+			if !sessionStore.Activate(sessionID) {
+				writeJSON(gin.H{"type": "error", "message": "session not ready"})
+				continue
+			}
 			ses, _ := sessionStore.Get(sessionID)
 			asrCtx, asrCancel = context.WithCancel(context.Background())
 			asrEngine = newASR(ses.SourceLang)
@@ -245,8 +252,9 @@ func handleInterpret(c *gin.Context) {
 
 			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
 			if err != nil {
+				sessionStore.Fail(sessionID)
 				writeJSON(gin.H{"type": "error", "message": err.Error()})
-				continue
+				return
 			}
 
 			sourceLang := ses.SourceLang

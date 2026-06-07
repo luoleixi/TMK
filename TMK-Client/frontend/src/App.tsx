@@ -44,7 +44,45 @@ type HistoryRecord = {
 
 const DEVICE_SYSTEM_AUDIO = -2;
 
+const isSubtitle = new URLSearchParams(window.location.search).get('mode') === 'subtitle';
+
+function SubtitleView() {
+  const [text, setText] = useState('');
+
+  useEffect(() => {
+    const off = Events.On('translation', (event: any) => {
+      setText(event.data.text);
+    });
+    return () => off();
+  }, []);
+
+  return (
+    <div style={{
+      width: '100vw', height: '100vh',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'transparent',
+      pointerEvents: 'none',
+      userSelect: 'none',
+    }}>
+      <span style={{
+        color: '#fff',
+        fontSize: 28,
+        fontWeight: 600,
+        textShadow: '0 2px 8px rgba(0,0,0,0.8)',
+        textAlign: 'center',
+        padding: '0 16px',
+      }}>
+        {text}
+      </span>
+    </div>
+  );
+}
+
 function App() {
+  if (isSubtitle) {
+    return <SubtitleView />;
+  }
+
   const [sourceLang, setSourceLang] = useState('zh');
   const [targetLang, setTargetLang] = useState('en');
   const [running, setRunning] = useState(false);

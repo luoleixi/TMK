@@ -161,6 +161,10 @@ func waveInProc(hwi, uMsg, dwInstance, dwParam1, dwParam2 uintptr) uintptr {
 		data := make([]byte, hdr.dwBytesRecorded)
 		copy(data, unsafe.Slice((*byte)(unsafe.Pointer(hdr.lpData)), hdr.dwBytesRecorded))
 		c.callback(data)
+	} else if hdr.dwBytesRecorded == 0 && c.running {
+		log.Printf("[audio] WIM_DATA with 0 bytes recorded — device may be silent or not capturing")
+	} else if !c.running {
+		log.Printf("[audio] WIM_DATA received but capture is stopped, dropping %d bytes", hdr.dwBytesRecorded)
 	}
 
 	// re-add buffer (already prepared, no need to re-prepare)

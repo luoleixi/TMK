@@ -36,11 +36,20 @@ func (s *CaptureService) StartCapture(sourceType string) error {
 				break
 			}
 		}
+		if deviceID == audio.DefaultDevice().ID {
+			log.Printf("[capture] Stereo Mix not found, falling back to default device. Available devices:")
+			for _, d := range audio.ListDevices() {
+				log.Printf("[capture]   device %d: %s", d.ID, d.Name)
+			}
+		}
 	}
 
 	var count int
 	c, err := audio.StartCapture(deviceID, func(pcm []byte) {
 		count++
+		if count == 1 {
+			log.Printf("[capture] first audio chunk received: %d bytes", len(pcm))
+		}
 		if count%50 == 1 {
 			log.Printf("[capture] sent %d chunks (%d bytes each)", count, len(pcm))
 		}

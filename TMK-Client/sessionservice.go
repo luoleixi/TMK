@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -157,4 +158,81 @@ func (s *SessionService) StopInterpret() error {
 		conn.Close()
 	}
 	return nil
+}
+
+// ---------- history ----------
+
+type HistorySession struct {
+	ID          string `json:"id"`
+	SourceLang  string `json:"source_lang"`
+	TargetLang  string `json:"target_lang"`
+	Status      string `json:"status"`
+	RecordCount int    `json:"record_count"`
+	CreatedAt   string `json:"created_at"`
+	EndedAt     string `json:"ended_at,omitempty"`
+}
+
+type HistoryRecord struct {
+	ID              int     `json:"id"`
+	SessionID       string  `json:"session_id"`
+	Sequence        int     `json:"sequence"`
+	SourceText      string  `json:"source_text"`
+	TranslatedText  string  `json:"translated_text"`
+	Confidence      float64 `json:"confidence"`
+	AudioDurationMs int     `json:"audio_duration_ms"`
+	CreatedAt       string  `json:"created_at"`
+}
+
+type HistoryDetail struct {
+	SessionID       string          `json:"session_id"`
+	SourceLang      string          `json:"source_lang"`
+	TargetLang      string          `json:"target_lang"`
+	DurationSeconds int             `json:"duration_seconds"`
+	CreatedAt       string          `json:"created_at"`
+	EndedAt         string          `json:"ended_at,omitempty"`
+	Records         []HistoryRecord `json:"records"`
+}
+
+// ListHistory fetches paginated session history from the backend
+func (s *SessionService) ListHistory(offset, limit int) ([]HistorySession, int, error) {
+	u, _ := url.Parse(backendURL + "/history")
+	q := url.Values{}
+	q.Set("offset", fmt.Sprint(offset))
+	q.Set("limit", fmt.Sprint(limit))
+	u.RawQuery = q.Encode()
+
+	resp, err := http.Get(u.String())
+	if err != nil {
+		return nil, 0, fmt.Errorf("list history: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code int `json:"code"`
+		Data struct {
+			Total    int              `json:"total"`
+			Sessions []HistorySession `json:"sessions"`
+		} `json:"data"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	return result.Data.Sessions, result.Data.Total, nil
+}
+
+// GetHistory fetches a single history session with all its records
+func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
+	resp, err := http.Get(backendURL + "/history/" + sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("get history: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code int            `json:"code"`
+		Data HistoryDetail  `json:"data"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result.Data.SessionID == "" {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+	return &result.Data, nil
 }

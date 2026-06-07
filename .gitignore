@@ -7,3 +7,9 @@
 # Documentation
 docs/
 CLAUDE.md
+
+# Build output
+build/
+
+# Config (contains API keys)
+config.yaml

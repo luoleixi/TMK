@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { SessionService, CaptureService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
 
@@ -41,6 +41,7 @@ function App() {
   const [status, setStatus] = useState('就绪');
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [micDeviceID, setMicDeviceID] = useState(-1);
+  const transitioning = useRef(false);
 
   useEffect(() => {
     Events.On('transcript', (event: any) => {
@@ -63,6 +64,8 @@ function App() {
   }, []);
 
   const handleToggle = async () => {
+    if (transitioning.current) return;
+    transitioning.current = true;
     if (running) {
       setStatus('停止中...');
       CaptureService.StopCapture();
@@ -81,6 +84,7 @@ function App() {
         setStatus('连接失败: ' + e.message);
       }
     }
+    transitioning.current = false;
   };
 
   const handleDeviceChange = async (deviceID: number) => {

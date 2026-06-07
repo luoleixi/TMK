@@ -38,9 +38,11 @@ function App() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState(DEVICE_SYSTEM_AUDIO);
   const transitioning = useRef(false);
+  const sourceTextRef = useRef('');
 
   useEffect(() => {
     Events.On('transcript', (event: any) => {
+      sourceTextRef.current = event.data.text;
       setSourceText(event.data.text);
     });
     Events.On('translation', (event: any) => {
@@ -48,7 +50,7 @@ function App() {
       if (event.data.is_final) {
         setRecords(prev => [...prev, {
           id: Date.now(),
-          sourceText: sourceText || event.data.text,
+          sourceText: sourceTextRef.current,
           translatedText: event.data.text,
         }]);
       }

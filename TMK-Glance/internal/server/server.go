@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -25,12 +26,18 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-var sessionStore = store.NewSessionStore()
+var sessionStore *store.SessionStore
 var translateSvc translator.Translator
 
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	asrCfg = cfg
 	translateSvc = newTranslator(cfg)
+
+	var err error
+	sessionStore, err = store.NewSessionStore(cfg.Storage.DBPath)
+	if err != nil {
+		log.Fatalf("[db] init failed: %v", err)
+	}
 
 	r := gin.Default()
 
@@ -159,11 +166,100 @@ func handleTranslate(c *gin.Context) {
 // ---------- history ----------
 
 func handleListHistory(c *gin.Context) {
-	c.JSON(200, gin.H{"message": "stub"})
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	sourceLang := c.Query("source_lang")
+	targetLang := c.Query("target_lang")
+	dateFrom := c.Query("date_from")
+	dateTo := c.Query("date_to")
+
+	all := sessionStore.List()
+	filtered := make([]*model.Session, 0)
+
+	var fromTime, toTime time.Time
+	if dateFrom != "" {
+		if t, err := time.Parse(time.RFC3339, dateFrom); err == nil {
+			fromTime = t
+		}
+	}
+	if dateTo != "" {
+		if t, err := time.Parse(time.RFC3339, dateTo); err == nil {
+			toTime = t
+		}
+	}
+
+	for _, ses := range all {
+		if sourceLang != "" && ses.SourceLang != sourceLang {
+			continue
+		}
+		if targetLang != "" && ses.TargetLang != targetLang {
+			continue
+		}
+		if !fromTime.IsZero() && ses.CreatedAt.Before(fromTime) {
+			continue
+		}
+		if !toTime.IsZero() && ses.CreatedAt.After(toTime) {
+			continue
+		}
+		filtered = append(filtered, ses)
+	}
+
+	total := len(filtered)
+	if offset >= total {
+		offset = 0
+		filtered = nil
+	}
+	if offset < total {
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		filtered = filtered[offset:end]
+	}
+
+	c.JSON(200, gin.H{
+		"code":    0,
+		"message": "ok",
+		"data": gin.H{
+			"total":    total,
+			"offset":   offset,
+			"limit":    limit,
+			"sessions": filtered,
+		},
+	})
 }
 
 func handleGetHistory(c *gin.Context) {
-	c.JSON(200, gin.H{"message": "stub"})
+	ses, ok := sessionStore.Get(c.Param("id"))
+	if !ok {
+		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
+		return
+	}
+	records, _ := sessionStore.Records(ses.ID)
+
+	c.JSON(200, gin.H{
+		"code":    0,
+		"message": "ok",
+		"data": gin.H{
+			"session_id":       ses.ID,
+			"source_lang":      ses.SourceLang,
+			"target_lang":      ses.TargetLang,
+			"duration_seconds": durationSeconds(ses),
+			"created_at":       ses.CreatedAt,
+			"ended_at":         ses.EndedAt,
+			"records":          records,
+		},
+	})
+}
+
+func durationSeconds(ses *model.Session) int {
+	if ses.EndedAt == nil {
+		return int(time.Since(ses.CreatedAt).Seconds())
+	}
+	return int(ses.EndedAt.Sub(ses.CreatedAt).Seconds())
 }
 
 // ---------- WebSocket ----------
@@ -274,7 +370,7 @@ func handleInterpret(c *gin.Context) {
 								SessionID:      sessionID,
 								SourceText:     r.Text,
 								TranslatedText: translated,
-								Timestamp:      time.Now(),
+								CreatedAt:      time.Now(),
 							})
 						}
 					}

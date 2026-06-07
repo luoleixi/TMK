@@ -10,6 +10,9 @@ type Config struct {
 	Server struct {
 		Port string `yaml:"port"`
 	} `yaml:"server"`
+	Storage struct {
+		DBPath string `yaml:"db_path"`
+	} `yaml:"storage"`
 	ASR struct {
 		Provider string `yaml:"provider"`
 		Bailian  struct {
@@ -32,6 +35,7 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{}
 	cfg.Server.Port = ":8080"
+	cfg.Storage.DBPath = "./tmk.db"
 	cfg.ASR.Provider = "mock"
 	cfg.Translator.Provider = "mock"
 

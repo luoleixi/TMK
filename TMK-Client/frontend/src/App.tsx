@@ -35,16 +35,16 @@ function App() {
   const [status, setStatus] = useState('就绪');
 
   useEffect(() => {
-    Events.On('transcript', (data: any) => {
-      setSourceText(data.text);
+    Events.On('transcript', (event: any) => {
+      setSourceText(event.data.text);
     });
-    Events.On('translation', (data: any) => {
-      setTranslatedText(data.text);
-      if (data.is_final) {
+    Events.On('translation', (event: any) => {
+      setTranslatedText(event.data.text);
+      if (event.data.is_final) {
         setRecords(prev => [...prev, {
           id: Date.now(),
-          sourceText: sourceText || data.text,
-          translatedText: data.text,
+          sourceText: sourceText || event.data.text,
+          translatedText: event.data.text,
         }]);
       }
     });
@@ -62,7 +62,7 @@ function App() {
       try {
         await SessionService.CreateSession(sourceLang, targetLang, inputType);
         await SessionService.StartInterpret();
-        await CaptureService.StartCapture(-1);
+        await CaptureService.StartCapture(inputType);
         setStatus('翻译中...');
         setRunning(true);
       } catch (e: any) {

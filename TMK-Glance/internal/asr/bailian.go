@@ -131,6 +131,7 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 				text := event.Payload.Output.Sentence.Text
 				isFinal := event.Payload.Output.Sentence.SentenceEnd
 				if text != "" {
+					log.Printf("[asr:bailian] result: %q (final=%v)", text, isFinal)
 					select {
 					case out <- Result{Text: text, IsFinal: isFinal}:
 					case <-ctx.Done():
@@ -143,6 +144,8 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 			case "task-failed":
 				log.Printf("[asr:bailian] task failed: %s %s", event.Header.ErrorCode, event.Header.ErrorMessage)
 				return
+			default:
+				log.Printf("[asr:bailian] unexpected event: %s (raw: %s)", event.Header.Event, string(raw))
 			}
 		}
 	}()

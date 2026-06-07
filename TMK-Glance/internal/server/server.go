@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"tmk-glance/internal/asr"
@@ -197,7 +198,13 @@ func handleInterpret(c *gin.Context) {
 		asrCancel context.CancelFunc = func() {}
 		audioCh   chan []byte
 		cnt       int
+		writeMu   sync.Mutex
 	)
+	writeJSON := func(v any) {
+		writeMu.Lock()
+		conn.WriteJSON(v)
+		writeMu.Unlock()
+	}
 	defer func() {
 		asrCancel()
 		if asrEngine != nil {
@@ -238,18 +245,18 @@ func handleInterpret(c *gin.Context) {
 
 			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
 			if err != nil {
-				conn.WriteJSON(gin.H{"type": "error", "message": err.Error()})
+				writeJSON(gin.H{"type": "error", "message": err.Error()})
 				continue
 			}
 
 			sourceLang := ses.SourceLang
 			targetLang := ses.TargetLang
 
-			conn.WriteJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
+			writeJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
 
 			go func() {
 				for r := range resultCh {
-					conn.WriteJSON(gin.H{
+					writeJSON(gin.H{
 						"type":      "transcript",
 						"text":      r.Text,
 						"is_final":  r.IsFinal,
@@ -257,7 +264,7 @@ func handleInterpret(c *gin.Context) {
 					})
 					if r.Text != "" {
 						translated, _ := translateSvc.Translate(sourceLang, targetLang, r.Text)
-						conn.WriteJSON(gin.H{
+						writeJSON(gin.H{
 							"type":      "translation",
 							"text":      translated,
 							"is_final":  r.IsFinal,
@@ -285,11 +292,11 @@ func handleInterpret(c *gin.Context) {
 			}
 
 		case "ping":
-			conn.WriteJSON(gin.H{"type": "pong", "timestamp_ms": time.Now().UnixMilli()})
+			writeJSON(gin.H{"type": "pong", "timestamp_ms": time.Now().UnixMilli()})
 
 		case "stop":
 			asrCancel()
-			conn.WriteJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
+			writeJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
 			return
 		}
 	}

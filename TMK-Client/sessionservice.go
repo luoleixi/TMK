@@ -116,11 +116,13 @@ func (s *SessionService) StartInterpret() error {
 			case "transcript":
 				var t TranscriptMsg
 				json.Unmarshal(msg, &t)
+				log.Printf("[ws] received transcript: %q (final=%v)", t.Text, t.IsFinal)
 				application.Get().Event.Emit("transcript", t)
 
 			case "translation":
 				var t TranslationMsg
 				json.Unmarshal(msg, &t)
+				log.Printf("[ws] received translation: %q (final=%v)", t.Text, t.IsFinal)
 				application.Get().Event.Emit("translation", t)
 
 			case "error":

@@ -14,7 +14,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-const backendURL = "http://localhost:8080/api/v1"
+const backendURL = "http://117.72.159.185:8080/api/v1"
 
 type SessionService struct {
 	mu       sync.Mutex
@@ -91,7 +91,7 @@ func (s *SessionService) StartInterpret() error {
 		s.mu.Unlock()
 	}
 
-	url := fmt.Sprintf("ws://localhost:8080/api/v1/interpret?session_id=%s", sessionID)
+	url := fmt.Sprintf("ws://117.72.159.185:8080/api/v1/interpret?session_id=%s", sessionID)
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)

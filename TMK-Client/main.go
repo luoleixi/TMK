@@ -34,7 +34,7 @@ func main() {
 	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
 	// 'Mac' options tailor the application when running an macOS.
 	sessionSvc = &SessionService{}
-	captureSvc = &CaptureService{}
+	captureSvc = NewCaptureService()
 
 	app := application.New(application.Options{
 		Name:        "TMK-Client",

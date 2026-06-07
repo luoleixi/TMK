@@ -33,7 +33,9 @@ func (s *CaptureService) StartCapture(sourceType string) error {
 		}
 		if sessionSvc != nil {
 			if err := sessionSvc.SendAudio(pcm); err != nil {
-				log.Printf("[capture] send error: %v", err)
+				if err.Error() != "not connected" {
+					log.Printf("[capture] send error: %v", err)
+				}
 			}
 		} else {
 			log.Printf("[capture] sessionSvc is nil!")

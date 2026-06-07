@@ -39,15 +39,17 @@ function App() {
   const [selectedDevice, setSelectedDevice] = useState(DEVICE_SYSTEM_AUDIO);
   const transitioning = useRef(false);
   const sourceTextRef = useRef('');
+  const lastSourceRef = useRef('');
 
   useEffect(() => {
-    Events.On('transcript', (event: any) => {
+    const offTranscript = Events.On('transcript', (event: any) => {
       sourceTextRef.current = event.data.text;
       setSourceText(event.data.text);
     });
-    Events.On('translation', (event: any) => {
+    const offTranslation = Events.On('translation', (event: any) => {
       setTranslatedText(event.data.text);
-      if (event.data.is_final) {
+      if (event.data.is_final && sourceTextRef.current && sourceTextRef.current !== lastSourceRef.current) {
+        lastSourceRef.current = sourceTextRef.current;
         setRecords(prev => [...prev, {
           id: Date.now(),
           sourceText: sourceTextRef.current,
@@ -59,6 +61,11 @@ function App() {
     CaptureService.ListCaptureDevices().then((list: DeviceInfo[]) => {
       setDevices(list);
     });
+
+    return () => {
+      offTranscript();
+      offTranslation();
+    };
   }, []);
 
   const handleToggle = async () => {
@@ -74,6 +81,7 @@ function App() {
       setStatus('创建会话中...');
       try {
         const inputType = selectedDevice === DEVICE_SYSTEM_AUDIO ? 'system_audio' : 'microphone';
+        lastSourceRef.current = '';
         await SessionService.CreateSession(sourceLang, targetLang, inputType);
         await SessionService.StartInterpret();
         await CaptureService.StartCapture(inputType);

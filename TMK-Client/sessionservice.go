@@ -266,10 +266,23 @@ type HistoryDetail struct {
 
 // ListHistory fetches paginated session history from the backend
 func (s *SessionService) ListHistory(offset, limit int) ([]HistorySession, int, error) {
+	return s.SearchHistory(offset, limit, "", "", "")
+}
+
+func (s *SessionService) SearchHistory(offset, limit int, keyword, dateFrom, dateTo string) ([]HistorySession, int, error) {
 	u, _ := url.Parse(backendURL + "/history")
 	q := url.Values{}
 	q.Set("offset", fmt.Sprint(offset))
 	q.Set("limit", fmt.Sprint(limit))
+	if keyword != "" {
+		q.Set("keyword", keyword)
+	}
+	if dateFrom != "" {
+		q.Set("date_from", dateFrom)
+	}
+	if dateTo != "" {
+		q.Set("date_to", dateTo)
+	}
 	u.RawQuery = q.Encode()
 
 	resp, err := http.Get(u.String())

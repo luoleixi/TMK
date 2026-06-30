@@ -49,6 +49,13 @@ export function ResumeInterpret(): $CancellablePromise<void> {
     return $Call.ByID(4000226251);
 }
 
+export function SearchHistory(offset: number, limit: number, keyword: string, dateFrom: string, dateTo: string): $CancellablePromise<[$models.HistorySession[], number]> {
+    return $Call.ByName("main.SessionService.SearchHistory", offset, limit, keyword, dateFrom, dateTo).then(($result: any) => {
+        $result[0] = $$createType3($result[0]);
+        return $result;
+    });
+}
+
 /**
  * SendAudio sends a PCM audio chunk to the backend
  */

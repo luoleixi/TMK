@@ -194,54 +194,25 @@ func handleListHistory(c *gin.Context) {
 	targetLang := c.Query("target_lang")
 	dateFrom := c.Query("date_from")
 	dateTo := c.Query("date_to")
+	keyword := c.Query("keyword")
 
-	all, err := sessionStore.List()
-	if err != nil {
-		log.Printf("[db] list history failed: %v", err)
-		c.JSON(500, gin.H{"code": 500, "message": "list history failed"})
-		return
-	}
-	filtered := make([]*model.Session, 0)
-
-	var fromTime, toTime time.Time
+	var fromTime, toTime *time.Time
 	if dateFrom != "" {
 		if t, err := time.Parse(time.RFC3339, dateFrom); err == nil {
-			fromTime = t
+			fromTime = &t
 		}
 	}
 	if dateTo != "" {
 		if t, err := time.Parse(time.RFC3339, dateTo); err == nil {
-			toTime = t
+			toTime = &t
 		}
 	}
 
-	for _, ses := range all {
-		if sourceLang != "" && ses.SourceLang != sourceLang {
-			continue
-		}
-		if targetLang != "" && ses.TargetLang != targetLang {
-			continue
-		}
-		if !fromTime.IsZero() && ses.CreatedAt.Before(fromTime) {
-			continue
-		}
-		if !toTime.IsZero() && ses.CreatedAt.After(toTime) {
-			continue
-		}
-		filtered = append(filtered, ses)
-	}
-
-	total := len(filtered)
-	if offset >= total {
-		offset = 0
-		filtered = nil
-	}
-	if offset < total {
-		end := offset + limit
-		if end > total {
-			end = total
-		}
-		filtered = filtered[offset:end]
+	filtered, total, err := sessionStore.Search(keyword, sourceLang, targetLang, fromTime, toTime, limit, offset)
+	if err != nil {
+		log.Printf("[db] search history failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "list history failed"})
+		return
 	}
 
 	c.JSON(200, gin.H{

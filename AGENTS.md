@@ -7,7 +7,7 @@
 #### 解决错误
 
 - translate 接口吞错误，失败也返回 200（已实现）
-- WebSocket `"audio"` text 消息发 JSON 而非 PCM
+- WebSocket `"audio"` text 消息发 JSON 而非 PCM（已实现）
 - StartInterpret TOCTOU 竞态，Stop 被吞
 - handlePause/handleStop 缺 try/catch，失败 UI 冻结
 

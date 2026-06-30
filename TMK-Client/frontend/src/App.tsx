@@ -368,6 +368,22 @@ function MainApp() {
     }
   };
 
+  useEffect(() => {
+    const offShortcut = Events.On('shortcut', (event: any) => {
+      const action = event.data;
+      if (action === 'start' && !running) {
+        void handleStart();
+      }
+      if (action === 'pause' && running && !paused) {
+        void handlePause();
+      }
+      if (action === 'stop' && (running || paused)) {
+        void handleStop();
+      }
+    });
+    return () => offShortcut();
+  }, [running, paused, sourceLang, targetLang, selectedDevice]);
+
   return (
     <div style={{ maxWidth: 600, margin: '0 auto', padding: 24, fontFamily: 'sans-serif' }}>
       <h1 style={{ textAlign: 'center' }}>TMK 同声传译</h1>

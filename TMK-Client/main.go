@@ -21,6 +21,7 @@ func init() {
 	application.RegisterEvent[string]("time")
 	application.RegisterEvent[TranscriptMsg]("transcript")
 	application.RegisterEvent[TranslationMsg]("translation")
+	application.RegisterEvent[string]("shortcut")
 }
 
 // main function serves as the application's entry point. It initializes the application, creates a window,
@@ -39,7 +40,8 @@ func main() {
 	exportSvc := NewExportService()
 	windowSvc := NewWindowService()
 
-	app := application.New(application.Options{
+	var app *application.App
+	app = application.New(application.Options{
 		Name:        "TMK-Client",
 		Description: "A demo of using raw HTML & CSS",
 		Services: []application.Service{
@@ -52,10 +54,28 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 		},
+		KeyBindings: map[string]func(window application.Window){
+			"CmdOrCtrl+Shift+S": func(window application.Window) { emitShortcut(app, shortcutStart) },
+			"CmdOrCtrl+Shift+P": func(window application.Window) { emitShortcut(app, shortcutPause) },
+			"CmdOrCtrl+Shift+X": func(window application.Window) { emitShortcut(app, shortcutStop) },
+		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
+		Windows: application.WindowsOptions{
+			WndProcInterceptor: func(hwnd uintptr, msg uint32, wParam, lParam uintptr) (uintptr, bool) {
+				registerGlobalHotkeys(hwnd)
+				if isHotkeyMessage(msg) {
+					if action, ok := handleGlobalHotkey(wParam); ok {
+						emitShortcut(app, action)
+						return 0, true
+					}
+				}
+				return 0, false
+			},
+		},
 	})
+	defer unregisterGlobalHotkeys()
 
 	// Create a new window with the necessary options.
 	// 'Title' is the title of the window.

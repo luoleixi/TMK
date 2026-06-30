@@ -159,7 +159,11 @@ func handleTranslate(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 400, "message": "text, source_lang and target_lang are required"})
 		return
 	}
-	result, _ := translateSvc.Translate(req.SourceLang, req.TargetLang, req.Text)
+	result, err := translateSvc.Translate(req.SourceLang, req.TargetLang, req.Text)
+	if err != nil {
+		c.JSON(502, gin.H{"code": 502, "message": err.Error()})
+		return
+	}
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"translated_text": result}})
 }
 
@@ -358,13 +362,20 @@ func handleInterpret(c *gin.Context) {
 						"timestamp": time.Now().UnixMilli(),
 					})
 					if r.Text != "" {
-						translated, _ := translateSvc.Translate(sourceLang, targetLang, r.Text)
-						writeJSON(gin.H{
+						translated, err := translateSvc.Translate(sourceLang, targetLang, r.Text)
+						payload := gin.H{
 							"type":      "translation",
 							"text":      translated,
 							"is_final":  r.IsFinal,
 							"timestamp": time.Now().UnixMilli(),
-						})
+						}
+						if err != nil {
+							log.Printf("[translate] fallback to source text: %v", err)
+							translated = r.Text
+							payload["text"] = translated
+							payload["warning"] = "translate_failed_fallback_to_source"
+						}
+						writeJSON(payload)
 						if r.IsFinal {
 							sessionStore.AddRecord(sessionID, model.Record{
 								SessionID:      sessionID,

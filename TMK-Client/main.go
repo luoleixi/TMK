@@ -35,13 +35,15 @@ func main() {
 	// 'Mac' options tailor the application when running an macOS.
 	sessionSvc = &SessionService{}
 	captureSvc = NewCaptureService()
+	settingsSvc := NewSettingsService()
 
 	app := application.New(application.Options{
 		Name:        "TMK-Client",
 		Description: "A demo of using raw HTML & CSS",
-	Services: []application.Service{
+		Services: []application.Service{
 			application.NewService(sessionSvc),
 			application.NewService(captureSvc),
+			application.NewService(settingsSvc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { SessionService, CaptureService } from '../bindings/changeme';
+import { SessionService, CaptureService, SettingsService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
 
 const BACKEND = 'http://117.72.159.185:8080/api/v1';
@@ -55,10 +55,12 @@ function App() {
   const [status, setStatus] = useState('就绪');
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState(DEVICE_SYSTEM_AUDIO);
+  const [subtitleMounted, setSubtitleMounted] = useState(true);
   const transitioning = useRef(false);
   const sessionIdRef = useRef('');
   const sourceTextRef = useRef('');
   const lastSourceRef = useRef('');
+  const settingsReady = useRef(false);
 
   // ---- history state ----
   const [view, setView] = useState<'live' | 'history'>('live');
@@ -84,8 +86,18 @@ function App() {
       }
     });
 
-    CaptureService.ListCaptureDevices().then((list: DeviceInfo[]) => {
+    Promise.all([
+      CaptureService.ListCaptureDevices(),
+      SettingsService.Load(),
+    ]).then(([list, settings]: [DeviceInfo[], any]) => {
       setDevices(list);
+      setSourceLang(settings.source_lang || 'zh');
+      setTargetLang(settings.target_lang || 'en');
+      const deviceID = typeof settings.selected_device === 'number' ? settings.selected_device : DEVICE_SYSTEM_AUDIO;
+      setSelectedDevice(deviceID);
+      setSubtitleMounted(settings.subtitle_mounted !== false);
+      CaptureService.SetMicrophoneDevice(deviceID);
+      settingsReady.current = true;
     });
 
     return () => {
@@ -93,6 +105,19 @@ function App() {
       offTranslation();
     };
   }, []);
+
+  useEffect(() => {
+    if (!settingsReady.current) return;
+    SettingsService.Save({
+      source_lang: sourceLang,
+      target_lang: targetLang,
+      selected_device: selectedDevice,
+      subtitle_mounted: subtitleMounted,
+      history_keyword: '',
+      history_date_from: '',
+      history_date_to: '',
+    }).catch((e: any) => setStatus('设置保存失败: ' + (e?.message || e)));
+  }, [sourceLang, targetLang, selectedDevice, subtitleMounted]);
 
   // ---- live translate ----
 
@@ -256,6 +281,15 @@ function App() {
             </label>
           </div>
 
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            <input
+              type="checkbox"
+              checked={subtitleMounted}
+              onChange={e => setSubtitleMounted(e.target.checked)}
+            />
+            挂载字幕
+          </label>
+
           <div style={{ textAlign: 'center', marginBottom: 16 }}>
             {!running && !paused ? (
               <button onClick={handleStart}
@@ -310,12 +344,14 @@ function App() {
             <p style={{ color: '#888', marginTop: 8 }}>{status}</p>
           </div>
 
-          <div style={{ background: '#1e1e1e', color: '#fff', borderRadius: 8, padding: 16, minHeight: 80, marginBottom: 16 }}>
-            <p style={{ margin: 0, fontSize: 20 }}>{sourceText || '等待语音输入...'}</p>
-            <p style={{ margin: '4px 0 0', fontSize: 18, color: '#4ec9b0' }}>
-              {translatedText || ''}
-            </p>
-          </div>
+          {subtitleMounted && (
+            <div style={{ background: '#1e1e1e', color: '#fff', borderRadius: 8, padding: 16, minHeight: 80, marginBottom: 16 }}>
+              <p style={{ margin: 0, fontSize: 20 }}>{sourceText || '等待语音输入...'}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 18, color: '#4ec9b0' }}>
+                {translatedText || ''}
+              </p>
+            </div>
+          )}
 
           <div>
             <h3>翻译记录</h3>

@@ -16,6 +16,14 @@ export function CreateSession(sourceLang: string, targetLang: string, inputType:
     return $Call.ByID(4095665835, sourceLang, targetLang, inputType);
 }
 
+export function DeleteHistory(sessionID: string): $CancellablePromise<void> {
+    return $Call.ByName("main.SessionService.DeleteHistory", sessionID);
+}
+
+export function DeleteHistoryBatch(ids: string[]): $CancellablePromise<number> {
+    return $Call.ByName("main.SessionService.DeleteHistoryBatch", ids);
+}
+
 /**
  * GetHistory fetches a single history session with all its records
  */

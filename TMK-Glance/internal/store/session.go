@@ -302,6 +302,47 @@ func (s *SessionStore) Records(sessionID string) ([]model.Record, bool, error) {
 	return recs, true, nil
 }
 
+func (s *SessionStore) Delete(id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.Exec(`DELETE FROM sessions WHERE session_id=?`, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (s *SessionStore) DeleteMany(ids []string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var deleted int
+	for _, id := range ids {
+		res, err := tx.Exec(`DELETE FROM sessions WHERE session_id=?`, id)
+		if err != nil {
+			return 0, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		deleted += int(n)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
 // Close closes the database connection.
 func (s *SessionStore) Close() error {
 	return s.db.Close()

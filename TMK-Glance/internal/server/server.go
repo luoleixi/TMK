@@ -55,6 +55,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 		v1.GET("/history", handleListHistory)
 		v1.GET("/history/:id", handleGetHistory)
+		v1.DELETE("/history/:id", handleDeleteHistory)
+		v1.POST("/history/delete", handleDeleteHistoryBatch)
 		v1.POST("/translate", handleTranslate)
 		v1.GET("/interpret", handleInterpret)
 	}
@@ -258,6 +260,41 @@ func handleGetHistory(c *gin.Context) {
 			"records":          records,
 		},
 	})
+}
+
+func handleDeleteHistory(c *gin.Context) {
+	ok, err := sessionStore.Delete(c.Param("id"))
+	if err != nil {
+		log.Printf("[db] delete history failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "delete history failed"})
+		return
+	}
+	if !ok {
+		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "message": "ok"})
+}
+
+func handleDeleteHistoryBatch(c *gin.Context) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": err.Error()})
+		return
+	}
+	if len(req.IDs) == 0 {
+		c.JSON(400, gin.H{"code": 400, "message": "ids are required"})
+		return
+	}
+	deleted, err := sessionStore.DeleteMany(req.IDs)
+	if err != nil {
+		log.Printf("[db] batch delete history failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "delete history failed"})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"deleted": deleted}})
 }
 
 func durationSeconds(ses *model.Session) int {

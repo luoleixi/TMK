@@ -320,3 +320,41 @@ func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
 	}
 	return &result.Data, nil
 }
+
+func (s *SessionService) DeleteHistory(sessionID string) error {
+	req, err := http.NewRequest(http.MethodDelete, backendURL+"/history/"+sessionID, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete history: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("delete history failed: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (s *SessionService) DeleteHistoryBatch(ids []string) (int, error) {
+	body := map[string][]string{"ids": ids}
+	data, _ := json.Marshal(body)
+	resp, err := http.Post(backendURL+"/history/delete", "application/json", bytes.NewReader(data))
+	if err != nil {
+		return 0, fmt.Errorf("delete history batch: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("delete history batch failed: status %d", resp.StatusCode)
+	}
+	var result struct {
+		Data struct {
+			Deleted int `json:"deleted"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+	return result.Data.Deleted, nil
+}

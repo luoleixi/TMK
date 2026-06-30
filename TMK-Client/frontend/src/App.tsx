@@ -77,6 +77,7 @@ function App() {
   const [historyKeyword, setHistoryKeyword] = useState('');
   const [historyDateFrom, setHistoryDateFrom] = useState('');
   const [historyDateTo, setHistoryDateTo] = useState('');
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
 
   useEffect(() => {
     const offTranscript = Events.On('transcript', (event: any) => {
@@ -205,6 +206,7 @@ function App() {
       const to = historyDateTo ? new Date(historyDateTo + 'T23:59:59').toISOString() : '';
       const result = await (SessionService as any).SearchHistory(0, 50, historyKeyword.trim(), from, to);
       setHistorySessions(result[0] || []);
+      setSelectedHistoryIds([]);
     } finally {
       setHistoryLoading(false);
     }
@@ -260,6 +262,27 @@ function App() {
       setStatus('已导出: ' + path);
     } catch (e: any) {
       setStatus('导出失败: ' + (e?.message || e));
+    }
+  };
+
+  const toggleHistorySelection = (id: string, selected: boolean) => {
+    setSelectedHistoryIds(prev => selected ? [...new Set([...prev, id])] : prev.filter(item => item !== id));
+  };
+
+  const deleteHistory = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    try {
+      if (ids.length === 1) {
+        await (SessionService as any).DeleteHistory(ids[0]);
+      } else {
+        await (SessionService as any).DeleteHistoryBatch(ids);
+      }
+      setStatus(`已删除 ${ids.length} 条历史`);
+      setExpandedId(null);
+      setHistoryRecords([]);
+      await loadHistoryList();
+    } catch (e: any) {
+      setStatus('删除失败: ' + (e?.message || e));
     }
   };
 
@@ -435,6 +458,11 @@ function App() {
             />
             <button onClick={loadHistoryList}>搜索</button>
           </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button onClick={() => deleteHistory(selectedHistoryIds)} disabled={selectedHistoryIds.length === 0}>
+              删除选中
+            </button>
+          </div>
           {historyLoading ? (
             <p style={{ color: '#888', textAlign: 'center' }}>加载中...</p>
           ) : historySessions.length === 0 ? (
@@ -443,7 +471,6 @@ function App() {
             historySessions.map(ses => (
               <div key={ses.id}>
                 <div
-                  onClick={() => handleExpand(ses.id)}
                   style={{
                     cursor: 'pointer', padding: 12, marginBottom: 8,
                     background: '#1e1e1e', borderRadius: 8,
@@ -451,12 +478,22 @@ function App() {
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: '#fff', fontSize: 15 }}>
-                      {langName(ses.source_lang)} → {langName(ses.target_lang)}
-                    </span>
-                    <span style={{ color: '#888', fontSize: 13 }}>
-                      {ses.record_count} 条记录 · {formatTime(ses.created_at)}
-                    </span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff', fontSize: 15 }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedHistoryIds.includes(ses.id)}
+                        onChange={e => toggleHistorySelection(ses.id, e.target.checked)}
+                      />
+                      <span onClick={() => handleExpand(ses.id)}>
+                        {langName(ses.source_lang)} → {langName(ses.target_lang)}
+                      </span>
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: '#888', fontSize: 13 }}>
+                        {ses.record_count} 条记录 · {formatTime(ses.created_at)}
+                      </span>
+                      <button onClick={() => deleteHistory([ses.id])}>删除</button>
+                    </div>
                   </div>
                 </div>
 

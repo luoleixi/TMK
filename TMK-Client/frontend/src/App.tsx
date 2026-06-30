@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { SessionService, CaptureService, SettingsService } from '../bindings/changeme';
+import { SessionService, CaptureService, SettingsService, ExportService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
 
 const BACKEND = 'http://117.72.159.185:8080/api/v1';
@@ -40,6 +40,12 @@ type HistoryRecord = {
   sequence: number;
   source_text: string;
   translated_text: string;
+};
+
+type ExportRecord = {
+  source_text: string;
+  translated_text: string;
+  sequence: number;
 };
 
 const DEVICE_SYSTEM_AUDIO = -2;
@@ -227,6 +233,29 @@ function App() {
     return d.toLocaleString();
   };
 
+  const liveExportRecords = (): ExportRecord[] => records.map((r, index) => ({
+    source_text: r.sourceText,
+    translated_text: r.translatedText,
+    sequence: index + 1,
+  }));
+
+  const historyExportRecords = (): ExportRecord[] => historyRecords.map(r => ({
+    source_text: r.source_text,
+    translated_text: r.translated_text,
+    sequence: r.sequence,
+  }));
+
+  const exportRecords = async (format: 'txt' | 'srt', title: string, rows: ExportRecord[]) => {
+    try {
+      const path = format === 'txt'
+        ? await ExportService.ExportTXT(title, rows)
+        : await ExportService.ExportSRT(title, rows);
+      setStatus('已导出: ' + path);
+    } catch (e: any) {
+      setStatus('导出失败: ' + (e?.message || e));
+    }
+  };
+
   return (
     <div style={{ maxWidth: 600, margin: '0 auto', padding: 24, fontFamily: 'sans-serif' }}>
       <h1 style={{ textAlign: 'center' }}>TMK 同声传译</h1>
@@ -354,7 +383,13 @@ function App() {
           )}
 
           <div>
-            <h3>翻译记录</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <h3>翻译记录</h3>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => exportRecords('txt', 'live-session', liveExportRecords())}>导出 TXT</button>
+                <button onClick={() => exportRecords('srt', 'live-session', liveExportRecords())}>导出 SRT</button>
+              </div>
+            </div>
             {records.length === 0 ? (
               <p style={{ color: '#888' }}>暂无记录</p>
             ) : (
@@ -399,6 +434,10 @@ function App() {
 
                 {expandedId === ses.id && (
                   <div style={{ marginBottom: 16, paddingLeft: 12 }}>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <button onClick={() => exportRecords('txt', `history-${ses.id}`, historyExportRecords())}>导出 TXT</button>
+                      <button onClick={() => exportRecords('srt', `history-${ses.id}`, historyExportRecords())}>导出 SRT</button>
+                    </div>
                     {historyRecords.length === 0 ? (
                       <p style={{ color: '#888' }}>暂无记录</p>
                     ) : (

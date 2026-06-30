@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // Wails uses Go's `embed` package to embed the frontend files into the binary.
@@ -16,6 +17,9 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed frontend/public/wails.png
+var trayIcon []byte
 
 func init() {
 	application.RegisterEvent[string]("time")
@@ -60,9 +64,10 @@ func main() {
 			"CmdOrCtrl+Shift+X": func(window application.Window) { emitShortcut(app, shortcutStop) },
 		},
 		Mac: application.MacOptions{
-			ApplicationShouldTerminateAfterLastWindowClosed: true,
+			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 		Windows: application.WindowsOptions{
+			DisableQuitOnLastWindowClosed: true,
 			WndProcInterceptor: func(hwnd uintptr, msg uint32, wParam, lParam uintptr) (uintptr, bool) {
 				registerGlobalHotkeys(hwnd)
 				if isHotkeyMessage(msg) {
@@ -73,6 +78,9 @@ func main() {
 				}
 				return 0, false
 			},
+		},
+		Linux: application.LinuxOptions{
+			DisableQuitOnLastWindowClosed: true,
 		},
 	})
 	defer unregisterGlobalHotkeys()
@@ -93,6 +101,10 @@ func main() {
 		BackgroundColour: application.NewRGB(27, 38, 54),
 		URL:              "/",
 	})
+	mainWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		mainWindow.Hide()
+		e.Cancel()
+	})
 	subtitleWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "subtitle",
 		Title:            "TMK 悬挂字幕",
@@ -104,7 +116,11 @@ func main() {
 		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 		URL:              "/?window=subtitle",
 		Hidden:           true,
+		Windows: application.WindowsWindow{
+			HiddenOnTaskbar: true,
+		},
 	})
+	setupSystemTray(app)
 
 	// Create a goroutine that emits an event containing the current time every second.
 	// The frontend can listen to this event and update the UI accordingly.

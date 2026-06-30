@@ -120,6 +120,70 @@ func (s *SessionStore) List() ([]*model.Session, error) {
 	return result, nil
 }
 
+func (s *SessionStore) Search(keyword, sourceLang, targetLang string, dateFrom, dateTo *time.Time, limit, offset int) ([]*model.Session, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `SELECT DISTINCT s.session_id, s.source_lang, s.target_lang, s.input_type, s.status, s.record_count, s.created_at, s.ended_at
+		FROM sessions s
+		LEFT JOIN records r ON r.session_id = s.session_id
+		WHERE 1=1`
+	countQuery := `SELECT COUNT(DISTINCT s.session_id)
+		FROM sessions s
+		LEFT JOIN records r ON r.session_id = s.session_id
+		WHERE 1=1`
+	var args []any
+
+	add := func(clause string, values ...any) {
+		query += clause
+		countQuery += clause
+		args = append(args, values...)
+	}
+	if sourceLang != "" {
+		add(" AND s.source_lang = ?", sourceLang)
+	}
+	if targetLang != "" {
+		add(" AND s.target_lang = ?", targetLang)
+	}
+	if dateFrom != nil {
+		add(" AND s.created_at >= ?", dateFrom.Format(time.RFC3339Nano))
+	}
+	if dateTo != nil {
+		add(" AND s.created_at <= ?", dateTo.Format(time.RFC3339Nano))
+	}
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		add(" AND (s.source_lang LIKE ? OR s.target_lang LIKE ? OR r.source_text LIKE ? OR r.translated_text LIKE ?)", like, like, like, like)
+	}
+
+	var total int
+	if err := s.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query += " ORDER BY s.created_at DESC LIMIT ? OFFSET ?"
+	rows, err := s.db.Query(query, append(args, limit, offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var result []*model.Session
+	for rows.Next() {
+		ses, ok, err := scanSessionFromRows(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		if ok {
+			result = append(result, ses)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return result, total, nil
+}
+
 func (s *SessionStore) Activate(id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

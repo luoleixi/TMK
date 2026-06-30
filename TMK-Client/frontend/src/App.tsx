@@ -74,6 +74,9 @@ function App() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyKeyword, setHistoryKeyword] = useState('');
+  const [historyDateFrom, setHistoryDateFrom] = useState('');
+  const [historyDateTo, setHistoryDateTo] = useState('');
 
   useEffect(() => {
     const offTranscript = Events.On('transcript', (event: any) => {
@@ -102,6 +105,9 @@ function App() {
       const deviceID = typeof settings.selected_device === 'number' ? settings.selected_device : DEVICE_SYSTEM_AUDIO;
       setSelectedDevice(deviceID);
       setSubtitleMounted(settings.subtitle_mounted !== false);
+      setHistoryKeyword(settings.history_keyword || '');
+      setHistoryDateFrom(settings.history_date_from || '');
+      setHistoryDateTo(settings.history_date_to || '');
       CaptureService.SetMicrophoneDevice(deviceID);
       settingsReady.current = true;
     });
@@ -119,11 +125,11 @@ function App() {
       target_lang: targetLang,
       selected_device: selectedDevice,
       subtitle_mounted: subtitleMounted,
-      history_keyword: '',
-      history_date_from: '',
-      history_date_to: '',
+      history_keyword: historyKeyword,
+      history_date_from: historyDateFrom,
+      history_date_to: historyDateTo,
     }).catch((e: any) => setStatus('设置保存失败: ' + (e?.message || e)));
-  }, [sourceLang, targetLang, selectedDevice, subtitleMounted]);
+  }, [sourceLang, targetLang, selectedDevice, subtitleMounted, historyKeyword, historyDateFrom, historyDateTo]);
 
   // ---- live translate ----
 
@@ -195,9 +201,10 @@ function App() {
   const loadHistoryList = async () => {
     setHistoryLoading(true);
     try {
-      const res = await fetch(`${BACKEND}/history?offset=0&limit=50`);
-      const json = await res.json();
-      setHistorySessions(json.data.sessions || []);
+      const from = historyDateFrom ? new Date(historyDateFrom + 'T00:00:00').toISOString() : '';
+      const to = historyDateTo ? new Date(historyDateTo + 'T23:59:59').toISOString() : '';
+      const result = await (SessionService as any).SearchHistory(0, 50, historyKeyword.trim(), from, to);
+      setHistorySessions(result[0] || []);
     } finally {
       setHistoryLoading(false);
     }
@@ -407,6 +414,27 @@ function App() {
 
       {view === 'history' && (
         <div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 140px auto', gap: 8, marginBottom: 16 }}>
+            <input
+              value={historyKeyword}
+              onChange={e => setHistoryKeyword(e.target.value)}
+              placeholder="关键词"
+              style={{ padding: 8 }}
+            />
+            <input
+              type="date"
+              value={historyDateFrom}
+              onChange={e => setHistoryDateFrom(e.target.value)}
+              style={{ padding: 8 }}
+            />
+            <input
+              type="date"
+              value={historyDateTo}
+              onChange={e => setHistoryDateTo(e.target.value)}
+              style={{ padding: 8 }}
+            />
+            <button onClick={loadHistoryList}>搜索</button>
+          </div>
           {historyLoading ? (
             <p style={{ color: '#888', textAlign: 'center' }}>加载中...</p>
           ) : historySessions.length === 0 ? (

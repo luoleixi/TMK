@@ -123,24 +123,35 @@ function App() {
   const handlePause = async () => {
     if (transitioning.current) return;
     transitioning.current = true;
-    CaptureService.StopCapture();
-    await (SessionService as any).PauseInterpret();
-    setStatus('已暂停');
-    setPaused(true);
-    transitioning.current = false;
+    try {
+      await CaptureService.StopCapture();
+      await (SessionService as any).PauseInterpret();
+      setStatus('已暂停');
+      setPaused(true);
+      setRunning(false);
+    } catch (e: any) {
+      setStatus('暂停失败: ' + (e?.message || e));
+    } finally {
+      transitioning.current = false;
+    }
   };
 
   const handleStop = async () => {
     if (transitioning.current) return;
     transitioning.current = true;
     setStatus('停止中...');
-    CaptureService.StopCapture();
-    await SessionService.StopInterpret();
-    sessionIdRef.current = '';
-    setStatus('已停止');
-    setRunning(false);
-    setPaused(false);
-    transitioning.current = false;
+    try {
+      await CaptureService.StopCapture();
+      await SessionService.StopInterpret();
+      sessionIdRef.current = '';
+      setStatus('已停止');
+      setRunning(false);
+      setPaused(false);
+    } catch (e: any) {
+      setStatus('停止失败: ' + (e?.message || e));
+    } finally {
+      transitioning.current = false;
+    }
   };
 
   const handleDeviceChange = async (deviceID: number) => {

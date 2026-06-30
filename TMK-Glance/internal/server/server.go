@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +57,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 		v1.GET("/history", handleListHistory)
 		v1.GET("/history/:id", handleGetHistory)
+		v1.POST("/history/:id/summary", handleSummarizeHistory)
 		v1.DELETE("/history/:id", handleDeleteHistory)
 		v1.POST("/history/delete", handleDeleteHistoryBatch)
 		v1.POST("/translate", handleTranslate)
@@ -255,11 +258,60 @@ func handleGetHistory(c *gin.Context) {
 			"source_lang":      ses.SourceLang,
 			"target_lang":      ses.TargetLang,
 			"duration_seconds": durationSeconds(ses),
+			"summary":          ses.Summary,
 			"created_at":       ses.CreatedAt,
 			"ended_at":         ses.EndedAt,
 			"records":          records,
 		},
 	})
+}
+
+func handleSummarizeHistory(c *gin.Context) {
+	ses, ok, err := sessionStore.Get(c.Param("id"))
+	if err != nil {
+		log.Printf("[db] get summary session failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "summarize history failed"})
+		return
+	}
+	if !ok {
+		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
+		return
+	}
+	if ses.Summary != "" {
+		c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"summary": ses.Summary}})
+		return
+	}
+	records, _, err := sessionStore.Records(ses.ID)
+	if err != nil {
+		log.Printf("[db] get summary records failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "summarize history failed"})
+		return
+	}
+	if len(records) == 0 {
+		c.JSON(400, gin.H{"code": 400, "message": "no records to summarize"})
+		return
+	}
+	summary, err := summarizeRecords(ses.SourceLang, ses.TargetLang, records)
+	if err != nil {
+		log.Printf("[summary] generate failed: %v", err)
+		c.JSON(502, gin.H{"code": 502, "message": err.Error()})
+		return
+	}
+	if err := sessionStore.UpdateSummary(ses.ID, summary); err != nil {
+		log.Printf("[db] update summary failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "save summary failed"})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"summary": summary}})
+}
+
+func summarizeRecords(sourceLang, targetLang string, records []model.Record) (string, error) {
+	var b strings.Builder
+	for _, r := range records {
+		fmt.Fprintf(&b, "原文: %s\n译文: %s\n", r.SourceText, r.TranslatedText)
+	}
+	prompt := "请总结以下同声传译会话，输出不超过 120 字的中文摘要，包含主要话题、结论和待办事项：\n" + b.String()
+	return translateSvc.Translate(sourceLang, targetLang, prompt)
 }
 
 func handleDeleteHistory(c *gin.Context) {

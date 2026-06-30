@@ -78,6 +78,10 @@ export function StartInterpret(): $CancellablePromise<void> {
     return $Call.ByID(2067849448);
 }
 
+export function SummarizeHistory(sessionID: string): $CancellablePromise<string> {
+    return $Call.ByName("main.SessionService.SummarizeHistory", sessionID);
+}
+
 /**
  * StopInterpret ends the translation session
  */

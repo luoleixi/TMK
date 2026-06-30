@@ -10,6 +10,7 @@ export class HistoryDetail {
     "source_lang": string;
     "target_lang": string;
     "duration_seconds": number;
+    "summary": string;
     "created_at": string;
     "ended_at"?: string;
     "records": HistoryRecord[];
@@ -27,6 +28,9 @@ export class HistoryDetail {
         }
         if (!("duration_seconds" in $$source)) {
             this["duration_seconds"] = 0;
+        }
+        if (!("summary" in $$source)) {
+            this["summary"] = "";
         }
         if (!("created_at" in $$source)) {
             this["created_at"] = "";
@@ -106,6 +110,7 @@ export class HistorySession {
     "target_lang": string;
     "status": string;
     "record_count": number;
+    "summary"?: string;
     "created_at": string;
     "ended_at"?: string;
 

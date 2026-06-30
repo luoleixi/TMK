@@ -121,13 +121,22 @@ func handleCreateSession(c *gin.Context) {
 		Status:     "ready",
 		CreatedAt:  time.Now(),
 	}
-	sessionStore.Create(ses)
+	if err := sessionStore.Create(ses); err != nil {
+		log.Printf("[db] create session failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "create session failed"})
+		return
+	}
 
 	c.JSON(201, gin.H{"code": 0, "message": "ok", "data": ses})
 }
 
 func handleGetSession(c *gin.Context) {
-	ses, ok := sessionStore.Get(c.Param("id"))
+	ses, ok, err := sessionStore.Get(c.Param("id"))
+	if err != nil {
+		log.Printf("[db] get session failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "get session failed"})
+		return
+	}
 	if !ok {
 		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
 		return
@@ -136,7 +145,13 @@ func handleGetSession(c *gin.Context) {
 }
 
 func handleStopSession(c *gin.Context) {
-	if !sessionStore.End(c.Param("id")) {
+	ok, err := sessionStore.End(c.Param("id"))
+	if err != nil {
+		log.Printf("[db] stop session failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "stop session failed"})
+		return
+	}
+	if !ok {
 		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
 		return
 	}
@@ -180,7 +195,12 @@ func handleListHistory(c *gin.Context) {
 	dateFrom := c.Query("date_from")
 	dateTo := c.Query("date_to")
 
-	all := sessionStore.List()
+	all, err := sessionStore.List()
+	if err != nil {
+		log.Printf("[db] list history failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "list history failed"})
+		return
+	}
 	filtered := make([]*model.Session, 0)
 
 	var fromTime, toTime time.Time
@@ -237,12 +257,22 @@ func handleListHistory(c *gin.Context) {
 }
 
 func handleGetHistory(c *gin.Context) {
-	ses, ok := sessionStore.Get(c.Param("id"))
+	ses, ok, err := sessionStore.Get(c.Param("id"))
+	if err != nil {
+		log.Printf("[db] get history session failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "get history failed"})
+		return
+	}
 	if !ok {
 		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
 		return
 	}
-	records, _ := sessionStore.Records(ses.ID)
+	records, _, err := sessionStore.Records(ses.ID)
+	if err != nil {
+		log.Printf("[db] get history records failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "get history failed"})
+		return
+	}
 
 	c.JSON(200, gin.H{
 		"code":    0,
@@ -277,14 +307,22 @@ func handleInterpret(c *gin.Context) {
 	defer conn.Close()
 
 	sessionID := c.Query("session_id")
-	if _, ok := sessionStore.Get(sessionID); !ok {
+	if _, ok, err := sessionStore.Get(sessionID); err != nil {
+		log.Printf("[db] validate session failed: %v", err)
+		conn.WriteJSON(gin.H{"type": "error", "message": "database error"})
+		return
+	} else if !ok {
 		conn.WriteJSON(gin.H{"type": "error", "message": "invalid session_id"})
 		return
 	}
 	log.Printf("[ws] client connected, session: %s", sessionID)
 
 	// Mark session completed when handler returns.
-	defer sessionStore.End(sessionID)
+	defer func() {
+		if _, err := sessionStore.End(sessionID); err != nil {
+			log.Printf("[db] end session failed: %v", err)
+		}
+	}()
 
 	var (
 		asrEngine asr.ASR
@@ -332,18 +370,31 @@ func handleInterpret(c *gin.Context) {
 
 		switch wsMsg.Type {
 		case "start":
-			if !sessionStore.Activate(sessionID) {
+			ok, err := sessionStore.Activate(sessionID)
+			if err != nil {
+				log.Printf("[db] activate session failed: %v", err)
+				writeJSON(gin.H{"type": "error", "message": "database error"})
+				return
+			}
+			if !ok {
 				writeJSON(gin.H{"type": "error", "message": "session not ready"})
 				continue
 			}
-			ses, _ := sessionStore.Get(sessionID)
+			ses, _, err := sessionStore.Get(sessionID)
+			if err != nil {
+				log.Printf("[db] get active session failed: %v", err)
+				writeJSON(gin.H{"type": "error", "message": "database error"})
+				return
+			}
 			asrCtx, asrCancel = context.WithCancel(context.Background())
 			asrEngine = newASR(ses.SourceLang)
 			audioCh = make(chan []byte, 8)
 
 			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
 			if err != nil {
-				sessionStore.Fail(sessionID)
+				if _, dbErr := sessionStore.Fail(sessionID); dbErr != nil {
+					log.Printf("[db] fail session failed: %v", dbErr)
+				}
 				writeJSON(gin.H{"type": "error", "message": err.Error()})
 				return
 			}
@@ -377,12 +428,15 @@ func handleInterpret(c *gin.Context) {
 						}
 						writeJSON(payload)
 						if r.IsFinal {
-							sessionStore.AddRecord(sessionID, model.Record{
+							if err := sessionStore.AddRecord(sessionID, model.Record{
 								SessionID:      sessionID,
 								SourceText:     r.Text,
 								TranslatedText: translated,
 								CreatedAt:      time.Now(),
-							})
+							}); err != nil {
+								log.Printf("[db] add record failed: %v", err)
+								writeJSON(gin.H{"type": "error", "message": "database error"})
+							}
 						}
 					}
 				}

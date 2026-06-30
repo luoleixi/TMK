@@ -17,22 +17,25 @@ import (
 const backendURL = "http://117.72.159.185:8080/api/v1"
 
 type SessionService struct {
-	mu       sync.Mutex
-	conn     *websocket.Conn
-	running  bool
+	mu        sync.Mutex
+	writeMu   sync.Mutex
+	conn      *websocket.Conn
+	running   bool
+	paused    bool
 	sessionID string
+	epoch     uint64
 }
 
 type TranscriptMsg struct {
-	Text    string `json:"text"`
-	IsFinal bool   `json:"is_final"`
-	Timestamp int64 `json:"timestamp"`
+	Text      string `json:"text"`
+	IsFinal   bool   `json:"is_final"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 type TranslationMsg struct {
-	Text    string `json:"text"`
-	IsFinal bool   `json:"is_final"`
-	Timestamp int64 `json:"timestamp"`
+	Text      string `json:"text"`
+	IsFinal   bool   `json:"is_final"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // CreateSession creates a new translation session on the backend
@@ -72,23 +75,22 @@ func (s *SessionService) CreateSession(sourceLang, targetLang, inputType string)
 func (s *SessionService) StartInterpret() error {
 	s.mu.Lock()
 	sessionID := s.sessionID
+	old := s.conn
+	if old != nil {
+		s.conn = nil
+		s.running = false
+		s.paused = false
+		s.epoch++
+	}
 	s.mu.Unlock()
 
 	if sessionID == "" {
 		return fmt.Errorf("no active session")
 	}
 
-	// Close existing connection if already running
-	s.mu.Lock()
-	if s.conn != nil {
-		old := s.conn
-		s.conn = nil
-		s.running = false
-		s.mu.Unlock()
-		old.WriteJSON(map[string]string{"type": "stop"})
-		old.Close()
-	} else {
-		s.mu.Unlock()
+	if old != nil {
+		_ = s.writeControl(old, map[string]string{"type": "stop"})
+		_ = old.Close()
 	}
 
 	url := fmt.Sprintf("ws://117.72.159.185:8080/api/v1/interpret?session_id=%s", sessionID)
@@ -100,18 +102,34 @@ func (s *SessionService) StartInterpret() error {
 	s.mu.Lock()
 	s.conn = conn
 	s.running = true
+	s.paused = false
+	s.epoch++
+	epoch := s.epoch
 	s.mu.Unlock()
 
 	log.Printf("[ws] connected, session: %s", sessionID)
 
 	// send start
-	conn.WriteJSON(map[string]string{"type": "start"})
+	if err := s.writeControl(conn, map[string]string{"type": "start"}); err != nil {
+		conn.Close()
+		s.mu.Lock()
+		if s.conn == conn && s.epoch == epoch {
+			s.conn = nil
+			s.running = false
+		}
+		s.mu.Unlock()
+		return fmt.Errorf("send start: %w", err)
+	}
 
 	// read loop
 	go func() {
 		defer func() {
 			s.mu.Lock()
-			s.running = false
+			if s.conn == conn && s.epoch == epoch {
+				s.conn = nil
+				s.running = false
+				s.paused = false
+			}
 			s.mu.Unlock()
 			log.Printf("[ws] disconnected")
 		}()
@@ -150,11 +168,15 @@ func (s *SessionService) StartInterpret() error {
 // SendAudio sends a PCM audio chunk to the backend
 func (s *SessionService) SendAudio(data []byte) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.conn == nil || !s.running {
+	conn := s.conn
+	running := s.running
+	s.mu.Unlock()
+	if conn == nil || !running {
 		return fmt.Errorf("not connected")
 	}
-	return s.conn.WriteMessage(websocket.BinaryMessage, data)
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
 // StopInterpret ends the translation session
@@ -163,12 +185,14 @@ func (s *SessionService) StopInterpret() error {
 	conn := s.conn
 	s.conn = nil
 	s.running = false
+	s.paused = false
+	s.epoch++
 	s.mu.Unlock()
 
 	if conn != nil {
-		conn.WriteJSON(map[string]string{"type": "stop"})
+		_ = s.writeControl(conn, map[string]string{"type": "stop"})
 		time.Sleep(100 * time.Millisecond)
-		conn.Close()
+		_ = conn.Close()
 	}
 	return nil
 }
@@ -176,23 +200,35 @@ func (s *SessionService) StopInterpret() error {
 // PauseInterpret pauses the current interpret session without closing the connection
 func (s *SessionService) PauseInterpret() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.conn == nil || !s.running {
+	conn := s.conn
+	if conn == nil || !s.running {
+		s.mu.Unlock()
 		return fmt.Errorf("not connected")
 	}
 	s.running = false
-	return s.conn.WriteJSON(map[string]string{"type": "pause"})
+	s.paused = true
+	s.mu.Unlock()
+	return s.writeControl(conn, map[string]string{"type": "pause"})
 }
 
 // ResumeInterpret resumes a paused interpret session
 func (s *SessionService) ResumeInterpret() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.conn == nil || s.running {
+	conn := s.conn
+	if conn == nil || !s.paused {
+		s.mu.Unlock()
 		return fmt.Errorf("not paused or not connected")
 	}
 	s.running = true
-	return s.conn.WriteJSON(map[string]string{"type": "resume"})
+	s.paused = false
+	s.mu.Unlock()
+	return s.writeControl(conn, map[string]string{"type": "resume"})
+}
+
+func (s *SessionService) writeControl(conn *websocket.Conn, v any) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return conn.WriteJSON(v)
 }
 
 // ---------- history ----------
@@ -262,8 +298,8 @@ func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
 	defer resp.Body.Close()
 
 	var result struct {
-		Code int            `json:"code"`
-		Data HistoryDetail  `json:"data"`
+		Code int           `json:"code"`
+		Data HistoryDetail `json:"data"`
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
 	if result.Data.SessionID == "" {

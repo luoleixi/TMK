@@ -14,7 +14,7 @@
 #### 实现功能
 
 - 翻译错误降级：翻译失败返回原文 + warning 而非静默（已实现）
-- ASR  WebSocket 并发写
+- ASR  WebSocket 并发写（已实现）
 - WASAPI Stop 死锁： 加超时保护
 - DB错误处理：为所有DB出现err情况进行处理
 

@@ -20,6 +20,7 @@ type bailianASR struct {
 	language string
 	conn     *websocket.Conn
 	mu       sync.RWMutex
+	writeMu  sync.Mutex
 }
 
 func NewBailian(apiKey, language string) ASR {
@@ -86,7 +87,7 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 				if bcnt%50 == 1 {
 					log.Printf("[asr:bailian] sent %d audio chunks to Bailian", bcnt)
 				}
-				if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+				if err := b.writeMessage(conn, websocket.BinaryMessage, data); err != nil {
 					log.Printf("[asr:bailian] write audio error: %v", err)
 					return
 				}
@@ -114,10 +115,10 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 				Payload struct {
 					Output struct {
 						Sentence struct {
-							Text    string `json:"text"`
-							EndTime *int64 `json:"end_time"`
-							BeginTime int64 `json:"begin_time"`
-							SentenceEnd bool `json:"sentence_end"`
+							Text        string `json:"text"`
+							EndTime     *int64 `json:"end_time"`
+							BeginTime   int64  `json:"begin_time"`
+							SentenceEnd bool   `json:"sentence_end"`
 						} `json:"sentence"`
 					} `json:"output"`
 				} `json:"payload"`
@@ -178,7 +179,7 @@ func (b *bailianASR) sendRunTask(taskID string) error {
 	conn := b.conn
 	b.mu.RUnlock()
 
-	return conn.WriteJSON(msg)
+	return b.writeJSON(conn, msg)
 }
 
 func (b *bailianASR) sendFinishTask(taskID string) {
@@ -196,8 +197,22 @@ func (b *bailianASR) sendFinishTask(taskID string) {
 	b.mu.RUnlock()
 
 	if conn != nil {
-		conn.WriteJSON(msg)
+		if err := b.writeJSON(conn, msg); err != nil {
+			log.Printf("[asr:bailian] finish-task write error: %v", err)
+		}
 	}
+}
+
+func (b *bailianASR) writeJSON(conn *websocket.Conn, v any) error {
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
+	return conn.WriteJSON(v)
+}
+
+func (b *bailianASR) writeMessage(conn *websocket.Conn, messageType int, data []byte) error {
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
+	return conn.WriteMessage(messageType, data)
 }
 
 func (b *bailianASR) waitTaskStarted(conn *websocket.Conn, timeout time.Duration) error {

@@ -22,6 +22,7 @@ type WasapiCapture struct {
 	callback      OnData
 	stopCh        chan struct{}
 	doneCh        chan struct{}
+	stopOnce      sync.Once
 	audioClient   *wca.IAudioClient
 	captureClient *wca.IAudioCaptureClient
 	device        *wca.IMMDevice
@@ -132,8 +133,15 @@ func (w *WasapiCapture) Stop() {
 	w.running = false
 	w.mu.Unlock()
 
-	close(w.stopCh)
-	<-w.doneCh
+	w.stopOnce.Do(func() {
+		close(w.stopCh)
+	})
+
+	select {
+	case <-w.doneCh:
+	case <-time.After(2 * time.Second):
+		log.Printf("[audio:wasapi] stop timed out; releasing resources anyway")
+	}
 
 	w.audioClient.Stop()
 	w.captureClient.Release()
@@ -206,9 +214,9 @@ func (w *WasapiCapture) readPackets(monoBuf *[]float32, channels uint16, isFloat
 		}
 
 		var (
-			data          *byte
-			framesToRead  uint32
-			flags         uint32
+			data         *byte
+			framesToRead uint32
+			flags        uint32
 		)
 		if err := w.captureClient.GetBuffer(&data, &framesToRead, &flags, nil, nil); err != nil {
 			return

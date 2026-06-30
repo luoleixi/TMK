@@ -11,7 +11,9 @@ type Config struct {
 		Port string `yaml:"port"`
 	} `yaml:"server"`
 	Storage struct {
+		Driver string `yaml:"driver"`
 		DBPath string `yaml:"db_path"`
+		DSN    string `yaml:"dsn"`
 	} `yaml:"storage"`
 	ASR struct {
 		Provider string `yaml:"provider"`
@@ -35,6 +37,7 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{}
 	cfg.Server.Port = ":8080"
+	cfg.Storage.Driver = "sqlite"
 	cfg.Storage.DBPath = "./tmk.db"
 	cfg.ASR.Provider = "mock"
 	cfg.Translator.Provider = "mock"
@@ -52,6 +55,15 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("TRANSLATOR_PROVIDER"); v != "" {
 		cfg.Translator.Provider = v
+	}
+	if v := os.Getenv("DB_DRIVER"); v != "" {
+		cfg.Storage.Driver = v
+	}
+	if v := os.Getenv("DB_DSN"); v != "" {
+		cfg.Storage.DSN = v
+	}
+	if v := os.Getenv("DB_PATH"); v != "" {
+		cfg.Storage.DBPath = v
 	}
 	if cfg.Translator.Bailian.APIKey == "" {
 		cfg.Translator.Bailian.APIKey = cfg.ASR.Bailian.APIKey

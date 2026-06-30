@@ -2,8 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { SessionService, CaptureService, SettingsService, ExportService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
 
-const BACKEND = 'http://117.72.159.185:8080/api/v1';
-
 const LANGUAGES = [
   { code: 'zh', name: '中文' },
   { code: 'en', name: 'English' },
@@ -32,6 +30,7 @@ type HistorySession = {
   source_lang: string;
   target_lang: string;
   record_count: number;
+  summary?: string;
   created_at: string;
 };
 
@@ -40,6 +39,11 @@ type HistoryRecord = {
   sequence: number;
   source_text: string;
   translated_text: string;
+};
+
+type HistoryDetail = {
+  summary?: string;
+  records?: HistoryRecord[];
 };
 
 type ExportRecord = {
@@ -73,6 +77,7 @@ function App() {
   const [historySessions, setHistorySessions] = useState<HistorySession[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
+  const [historySummary, setHistorySummary] = useState('');
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyKeyword, setHistoryKeyword] = useState('');
   const [historyDateFrom, setHistoryDateFrom] = useState('');
@@ -216,15 +221,17 @@ function App() {
     if (expandedId === sessionId) {
       setExpandedId(null);
       setHistoryRecords([]);
+      setHistorySummary('');
       return;
     }
     setExpandedId(sessionId);
     try {
-      const res = await fetch(`${BACKEND}/history/${sessionId}`);
-      const json = await res.json();
-      setHistoryRecords(json.data.records || []);
+      const detail = await SessionService.GetHistory(sessionId) as HistoryDetail;
+      setHistoryRecords(detail.records || []);
+      setHistorySummary(detail.summary || '');
     } catch {
       setHistoryRecords([]);
+      setHistorySummary('');
     }
   };
 
@@ -280,9 +287,21 @@ function App() {
       setStatus(`已删除 ${ids.length} 条历史`);
       setExpandedId(null);
       setHistoryRecords([]);
+      setHistorySummary('');
       await loadHistoryList();
     } catch (e: any) {
       setStatus('删除失败: ' + (e?.message || e));
+    }
+  };
+
+  const summarizeHistory = async (sessionId: string) => {
+    try {
+      setStatus('摘要生成中...');
+      const summary = await (SessionService as any).SummarizeHistory(sessionId);
+      setHistorySummary(summary);
+      setStatus('摘要已生成');
+    } catch (e: any) {
+      setStatus('摘要失败: ' + (e?.message || e));
     }
   };
 
@@ -502,7 +521,11 @@ function App() {
                     <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                       <button onClick={() => exportRecords('txt', `history-${ses.id}`, historyExportRecords())}>导出 TXT</button>
                       <button onClick={() => exportRecords('srt', `history-${ses.id}`, historyExportRecords())}>导出 SRT</button>
+                      <button onClick={() => summarizeHistory(ses.id)}>AI 摘要</button>
                     </div>
+                    {historySummary && (
+                      <p style={{ color: '#4ec9b0', background: '#111', padding: 12, borderRadius: 8 }}>{historySummary}</p>
+                    )}
                     {historyRecords.length === 0 ? (
                       <p style={{ color: '#888' }}>暂无记录</p>
                     ) : (

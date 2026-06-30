@@ -259,6 +259,7 @@ type HistoryDetail struct {
 	SourceLang      string          `json:"source_lang"`
 	TargetLang      string          `json:"target_lang"`
 	DurationSeconds int             `json:"duration_seconds"`
+	Summary         string          `json:"summary"`
 	CreatedAt       string          `json:"created_at"`
 	EndedAt         string          `json:"ended_at,omitempty"`
 	Records         []HistoryRecord `json:"records"`
@@ -319,6 +320,29 @@ func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 	return &result.Data, nil
+}
+
+func (s *SessionService) SummarizeHistory(sessionID string) (string, error) {
+	resp, err := http.Post(backendURL+"/history/"+sessionID+"/summary", "application/json", nil)
+	if err != nil {
+		return "", fmt.Errorf("summarize history: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("summarize history failed: status %d", resp.StatusCode)
+	}
+	var result struct {
+		Data struct {
+			Summary string `json:"summary"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.Data.Summary == "" {
+		return "", fmt.Errorf("empty summary")
+	}
+	return result.Data.Summary, nil
 }
 
 func (s *SessionService) DeleteHistory(sessionID string) error {

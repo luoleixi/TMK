@@ -9,6 +9,7 @@ type Session struct {
 	InputType   string     `json:"input_type"`
 	Status      string     `json:"status"` // "active" | "ended"
 	RecordCount int        `json:"record_count"`
+	Summary     string     `json:"summary,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
 }

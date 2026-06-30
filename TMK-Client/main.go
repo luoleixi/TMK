@@ -37,6 +37,7 @@ func main() {
 	captureSvc = NewCaptureService()
 	settingsSvc := NewSettingsService()
 	exportSvc := NewExportService()
+	windowSvc := NewWindowService()
 
 	app := application.New(application.Options{
 		Name:        "TMK-Client",
@@ -46,6 +47,7 @@ func main() {
 			application.NewService(captureSvc),
 			application.NewService(settingsSvc),
 			application.NewService(exportSvc),
+			application.NewService(windowSvc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -60,8 +62,9 @@ func main() {
 	// 'Mac' options tailor the window when running on macOS.
 	// 'BackgroundColour' is the background colour of the window.
 	// 'URL' is the URL that will be loaded into the webview.
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Window 1",
+	mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:  "main",
+		Title: "TMK 同声传译",
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			Backdrop:                application.MacBackdropTranslucent,
@@ -69,6 +72,18 @@ func main() {
 		},
 		BackgroundColour: application.NewRGB(27, 38, 54),
 		URL:              "/",
+	})
+	subtitleWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             "subtitle",
+		Title:            "TMK 悬挂字幕",
+		Width:            900,
+		Height:           180,
+		AlwaysOnTop:      true,
+		Frameless:        true,
+		BackgroundType:   application.BackgroundTypeTransparent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+		URL:              "/?window=subtitle",
+		Hidden:           true,
 	})
 
 	// Create a goroutine that emits an event containing the current time every second.

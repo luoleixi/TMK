@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { SessionService, CaptureService, SettingsService, ExportService } from '../bindings/changeme';
+import { SessionService, CaptureService, SettingsService, ExportService, WindowService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
 
 const LANGUAGES = [
@@ -54,7 +54,60 @@ type ExportRecord = {
 
 const DEVICE_SYSTEM_AUDIO = -2;
 
-function App() {
+function SubtitleWindow() {
+  const [sourceText, setSourceText] = useState('');
+  const [translatedText, setTranslatedText] = useState('');
+
+  useEffect(() => {
+    document.body.classList.add('subtitle-window');
+    const offTranscript = Events.On('transcript', (event: any) => {
+      setSourceText(event.data.text);
+    });
+    const offTranslation = Events.On('translation', (event: any) => {
+      setTranslatedText(event.data.text);
+    });
+    return () => {
+      document.body.classList.remove('subtitle-window');
+      offTranscript();
+      offTranslation();
+    };
+  }, []);
+
+  return (
+    <div style={{
+      width: '100vw',
+      height: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 18,
+      boxSizing: 'border-box',
+      background: 'transparent',
+    }}>
+      <div style={{
+        width: '100%',
+        minHeight: 96,
+        padding: '18px 24px',
+        boxSizing: 'border-box',
+        borderRadius: 8,
+        background: 'rgba(8, 12, 18, 0.72)',
+        border: '1px solid rgba(255, 255, 255, 0.18)',
+        boxShadow: '0 10px 32px rgba(0, 0, 0, 0.28)',
+        color: '#fff',
+        textAlign: 'center',
+      }}>
+        <div style={{ fontSize: 24, lineHeight: 1.35, fontWeight: 700 }}>
+          {translatedText || '等待翻译...'}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 16, lineHeight: 1.4, color: 'rgba(255, 255, 255, 0.72)' }}>
+          {sourceText || '等待语音输入...'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MainApp() {
   const [sourceLang, setSourceLang] = useState('zh');
   const [targetLang, setTargetLang] = useState('en');
   const [running, setRunning] = useState(false);
@@ -111,6 +164,11 @@ function App() {
       const deviceID = typeof settings.selected_device === 'number' ? settings.selected_device : DEVICE_SYSTEM_AUDIO;
       setSelectedDevice(deviceID);
       setSubtitleMounted(settings.subtitle_mounted !== false);
+      if (settings.subtitle_mounted !== false) {
+        void WindowService.ShowSubtitle();
+      } else {
+        void WindowService.HideSubtitle();
+      }
       setHistoryKeyword(settings.history_keyword || '');
       setHistoryDateFrom(settings.history_date_from || '');
       setHistoryDateTo(settings.history_date_to || '');
@@ -126,6 +184,11 @@ function App() {
 
   useEffect(() => {
     if (!settingsReady.current) return;
+    if (subtitleMounted) {
+      void WindowService.ShowSubtitle();
+    } else {
+      void WindowService.HideSubtitle();
+    }
     SettingsService.Save({
       source_lang: sourceLang,
       target_lang: targetLang,
@@ -546,6 +609,11 @@ function App() {
       )}
     </div>
   );
+}
+
+function App() {
+  const isSubtitleWindow = new URLSearchParams(window.location.search).get('window') === 'subtitle';
+  return isSubtitleWindow ? <SubtitleWindow /> : <MainApp />;
 }
 
 export default App;

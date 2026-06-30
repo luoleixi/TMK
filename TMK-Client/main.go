@@ -36,6 +36,7 @@ func main() {
 	sessionSvc = &SessionService{}
 	captureSvc = NewCaptureService()
 	settingsSvc := NewSettingsService()
+	exportSvc := NewExportService()
 
 	app := application.New(application.Options{
 		Name:        "TMK-Client",
@@ -44,6 +45,7 @@ func main() {
 			application.NewService(sessionSvc),
 			application.NewService(captureSvc),
 			application.NewService(settingsSvc),
+			application.NewService(exportSvc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

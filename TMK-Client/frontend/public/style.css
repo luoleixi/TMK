@@ -67,6 +67,15 @@ body {
     min-height: 100vh;
 }
 
+body.subtitle-window,
+body.subtitle-window #root {
+    width: 100vw;
+    height: 100vh;
+    min-width: 0;
+    min-height: 0;
+    background: transparent;
+}
+
 .container {
     display: flex;
     flex-direction: column;

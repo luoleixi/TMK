@@ -389,13 +389,10 @@ func handleInterpret(c *gin.Context) {
 			}()
 
 		case "audio":
-			if audioCh != nil {
-				audioCh <- msg
-				cnt++
-				if cnt%50 == 1 {
-					log.Printf("[ws] received %d audio chunks", cnt)
-				}
-			}
+			writeJSON(gin.H{
+				"type":    "error",
+				"message": "audio must be sent as binary PCM frames, not JSON text",
+			})
 
 		case "ping":
 			writeJSON(gin.H{"type": "pong", "timestamp_ms": time.Now().UnixMilli()})

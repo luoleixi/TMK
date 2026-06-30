@@ -34,4 +34,4 @@
 
 #### 架构升级
 
-- MySQL 替代 SQLite
+- MySQL 替代 SQLite（已实现）

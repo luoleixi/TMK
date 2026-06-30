@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -10,37 +11,85 @@ import (
 
 	"tmk-glance/internal/model"
 
+	_ "github.com/go-sql-driver/mysql"
 	_ "modernc.org/sqlite"
 )
 
+const (
+	DriverSQLite = "sqlite"
+	DriverMySQL  = "mysql"
+)
+
 type SessionStore struct {
-	mu sync.Mutex
-	db *sql.DB
+	mu     sync.Mutex
+	db     *sql.DB
+	driver string
 }
 
-func NewSessionStore(dbPath string) (*SessionStore, error) {
-	db, err := sql.Open("sqlite", dbPath)
+func NewSessionStore(driver, dbPath, dsn string) (*SessionStore, error) {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	if driver == "" {
+		driver = DriverSQLite
+	}
+	if driver == DriverSQLite && dbPath == "" {
+		dbPath = "./tmk.db"
+	}
+	if driver == DriverMySQL && dsn == "" {
+		return nil, errors.New("mysql storage requires storage.dsn or DB_DSN")
+	}
+
+	openDSN := dbPath
+	if driver == DriverMySQL {
+		openDSN = dsn
+	}
+
+	db, err := sql.Open(driver, openDSN)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if err := configureDB(db, driver); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+	if err := migrate(db, driver); err != nil {
 		db.Close()
 		return nil, err
 	}
-
-	if err := migrate(db); err != nil {
-		db.Close()
-		return nil, err
-	}
-	return &SessionStore{db: db}, nil
+	return &SessionStore{db: db, driver: driver}, nil
 }
 
-func migrate(db *sql.DB) error {
+func configureDB(db *sql.DB, driver string) error {
+	switch driver {
+	case DriverSQLite:
+		db.SetMaxOpenConns(1)
+		if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			return err
+		}
+		if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+			return err
+		}
+	case DriverMySQL:
+		db.SetMaxOpenConns(20)
+		db.SetMaxIdleConns(5)
+		db.SetConnMaxLifetime(30 * time.Minute)
+	default:
+		return fmt.Errorf("unsupported storage driver %q", driver)
+	}
+	return db.Ping()
+}
+
+func migrate(db *sql.DB, driver string) error {
+	switch driver {
+	case DriverSQLite:
+		return migrateSQLite(db)
+	case DriverMySQL:
+		return migrateMySQL(db)
+	default:
+		return fmt.Errorf("unsupported storage driver %q", driver)
+	}
+}
+
+func migrateSQLite(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS sessions (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,12 +125,56 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
+func migrateMySQL(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS sessions (
+			id           BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			session_id   VARCHAR(64) NOT NULL UNIQUE,
+			source_lang  VARCHAR(32) NOT NULL,
+			target_lang  VARCHAR(32) NOT NULL,
+			input_type   VARCHAR(32) NOT NULL DEFAULT 'system_audio',
+			status       VARCHAR(32) NOT NULL DEFAULT 'ready',
+			record_count INT NOT NULL DEFAULT 0,
+			summary      TEXT NOT NULL,
+			created_at   VARCHAR(40) NOT NULL,
+			ended_at     VARCHAR(40) NULL,
+			INDEX idx_sessions_created_at (created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+	`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS records (
+			id                BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			session_id        VARCHAR(64) NOT NULL,
+			sequence          INT NOT NULL,
+			source_text       TEXT NOT NULL,
+			translated_text   TEXT NOT NULL,
+			confidence        DOUBLE NOT NULL DEFAULT 0.0,
+			audio_duration_ms INT NOT NULL DEFAULT 0,
+			created_at        VARCHAR(40) NOT NULL,
+			INDEX idx_records_session_sequence (session_id, sequence),
+			CONSTRAINT fk_records_session FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+	`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE sessions ADD COLUMN summary TEXT NULL`)
+	if err != nil && !isDuplicateColumnError(err) {
+		return err
+	}
+	_, err = db.Exec(`UPDATE sessions SET summary='' WHERE summary IS NULL`)
+	return err
+}
+
 func (s *SessionStore) Create(ses *model.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO sessions (session_id, source_lang, target_lang, input_type, status, record_count, created_at)
-		 VALUES (?, ?, ?, ?, ?, 0, ?)`,
+		`INSERT INTO sessions (session_id, source_lang, target_lang, input_type, status, record_count, summary, created_at)
+		 VALUES (?, ?, ?, ?, ?, 0, '', ?)`,
 		ses.ID, ses.SourceLang, ses.TargetLang, ses.InputType, ses.Status, ses.CreatedAt.Format(time.RFC3339Nano),
 	)
 	return err
@@ -374,7 +467,7 @@ func scanSession(row interface{ Scan(...interface{}) error }) (*model.Session, b
 		inputType    string
 		status       string
 		recordCount  int
-		summary      string
+		summary      sql.NullString
 		createdAtStr string
 		endedAtStr   sql.NullString
 	)
@@ -395,7 +488,7 @@ func scanSession(row interface{ Scan(...interface{}) error }) (*model.Session, b
 		InputType:   inputType,
 		Status:      status,
 		RecordCount: recordCount,
-		Summary:     summary,
+		Summary:     summary.String,
 		CreatedAt:   createdAt,
 	}
 	if endedAtStr.Valid {
@@ -413,5 +506,6 @@ func scanSessionFromRows(rows *sql.Rows) (*model.Session, bool, error) {
 }
 
 func isDuplicateColumnError(err error) bool {
-	return strings.Contains(strings.ToLower(err.Error()), "duplicate column")
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "duplicate column name")
 }

@@ -36,7 +36,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	translateSvc = newTranslator(cfg)
 
 	var err error
-	sessionStore, err = store.NewSessionStore(cfg.Storage.DBPath)
+	sessionStore, err = store.NewSessionStore(cfg.Storage.Driver, cfg.Storage.DBPath, cfg.Storage.DSN)
 	if err != nil {
 		log.Fatalf("[db] init failed: %v", err)
 	}

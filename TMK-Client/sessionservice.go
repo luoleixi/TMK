@@ -14,8 +14,6 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-const backendURL = "http://117.72.159.185:8080/api/v1"
-
 type SessionService struct {
 	mu        sync.Mutex
 	writeMu   sync.Mutex
@@ -46,7 +44,7 @@ func (s *SessionService) CreateSession(sourceLang, targetLang, inputType string)
 		"input_type":  inputType,
 	}
 	data, _ := json.Marshal(body)
-	resp, err := http.Post(backendURL+"/sessions", "application/json", bytes.NewReader(data))
+	resp, err := http.Post(backendAPIURL()+"/sessions", "application/json", bytes.NewReader(data))
 	if err != nil {
 		return "", fmt.Errorf("create session: %w", err)
 	}
@@ -93,8 +91,13 @@ func (s *SessionService) StartInterpret() error {
 		_ = old.Close()
 	}
 
-	url := fmt.Sprintf("ws://117.72.159.185:8080/api/v1/interpret?session_id=%s", sessionID)
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	q := url.Values{}
+	q.Set("session_id", sessionID)
+	wsURL, err := backendWebSocketURL("/interpret", q)
+	if err != nil {
+		return err
+	}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)
 	}
@@ -271,7 +274,10 @@ func (s *SessionService) ListHistory(offset, limit int) ([]HistorySession, int, 
 }
 
 func (s *SessionService) SearchHistory(offset, limit int, keyword, dateFrom, dateTo string) ([]HistorySession, int, error) {
-	u, _ := url.Parse(backendURL + "/history")
+	u, err := url.Parse(backendAPIURL() + "/history")
+	if err != nil {
+		return nil, 0, fmt.Errorf("history url: %w", err)
+	}
 	q := url.Values{}
 	q.Set("offset", fmt.Sprint(offset))
 	q.Set("limit", fmt.Sprint(limit))
@@ -305,7 +311,7 @@ func (s *SessionService) SearchHistory(offset, limit int, keyword, dateFrom, dat
 
 // GetHistory fetches a single history session with all its records
 func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
-	resp, err := http.Get(backendURL + "/history/" + sessionID)
+	resp, err := http.Get(backendAPIURL() + "/history/" + sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("get history: %w", err)
 	}
@@ -323,7 +329,7 @@ func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
 }
 
 func (s *SessionService) SummarizeHistory(sessionID string) (string, error) {
-	resp, err := http.Post(backendURL+"/history/"+sessionID+"/summary", "application/json", nil)
+	resp, err := http.Post(backendAPIURL()+"/history/"+sessionID+"/summary", "application/json", nil)
 	if err != nil {
 		return "", fmt.Errorf("summarize history: %w", err)
 	}
@@ -346,7 +352,7 @@ func (s *SessionService) SummarizeHistory(sessionID string) (string, error) {
 }
 
 func (s *SessionService) DeleteHistory(sessionID string) error {
-	req, err := http.NewRequest(http.MethodDelete, backendURL+"/history/"+sessionID, nil)
+	req, err := http.NewRequest(http.MethodDelete, backendAPIURL()+"/history/"+sessionID, nil)
 	if err != nil {
 		return err
 	}
@@ -364,7 +370,7 @@ func (s *SessionService) DeleteHistory(sessionID string) error {
 func (s *SessionService) DeleteHistoryBatch(ids []string) (int, error) {
 	body := map[string][]string{"ids": ids}
 	data, _ := json.Marshal(body)
-	resp, err := http.Post(backendURL+"/history/delete", "application/json", bytes.NewReader(data))
+	resp, err := http.Post(backendAPIURL()+"/history/delete", "application/json", bytes.NewReader(data))
 	if err != nil {
 		return 0, fmt.Errorf("delete history batch: %w", err)
 	}

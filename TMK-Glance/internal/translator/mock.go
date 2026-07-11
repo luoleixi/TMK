@@ -1,6 +1,9 @@
 package translator
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 type mockTranslator struct{}
 
@@ -8,6 +11,11 @@ func NewMock() Translator {
 	return &mockTranslator{}
 }
 
-func (m *mockTranslator) Translate(sourceLang, targetLang, text string) (string, error) {
+func (m *mockTranslator) Translate(ctx context.Context, sourceLang, targetLang, text string) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+	}
 	return fmt.Sprintf("[%s→%s] %s", sourceLang, targetLang, text), nil
 }

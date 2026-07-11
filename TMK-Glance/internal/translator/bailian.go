@@ -2,6 +2,7 @@ package translator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,7 +29,7 @@ func NewBailian(apiKey string) Translator {
 	}
 }
 
-func (t *bailianTranslator) Translate(sourceLang, targetLang, text string) (string, error) {
+func (t *bailianTranslator) Translate(ctx context.Context, sourceLang, targetLang, text string) (string, error) {
 	if text == "" {
 		return "", nil
 	}
@@ -59,7 +60,7 @@ func (t *bailianTranslator) Translate(sourceLang, targetLang, text string) (stri
 		return "", fmt.Errorf("marshal translate request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", bailianTranslateURL, bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", bailianTranslateURL, bytes.NewReader(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("create translate request: %w", err)
 	}

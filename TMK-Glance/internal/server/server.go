@@ -179,7 +179,7 @@ func handleTranslate(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 400, "message": "text, source_lang and target_lang are required"})
 		return
 	}
-	result, err := translateSvc.Translate(req.SourceLang, req.TargetLang, req.Text)
+	result, err := translateSvc.Translate(c.Request.Context(), req.SourceLang, req.TargetLang, req.Text)
 	if err != nil {
 		c.JSON(502, gin.H{"code": 502, "message": err.Error()})
 		return
@@ -291,7 +291,7 @@ func handleSummarizeHistory(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 400, "message": "no records to summarize"})
 		return
 	}
-	summary, err := summarizeRecords(ses.SourceLang, ses.TargetLang, records)
+	summary, err := summarizeRecords(c.Request.Context(), ses.SourceLang, ses.TargetLang, records)
 	if err != nil {
 		log.Printf("[summary] generate failed: %v", err)
 		c.JSON(502, gin.H{"code": 502, "message": err.Error()})
@@ -305,13 +305,13 @@ func handleSummarizeHistory(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"summary": summary}})
 }
 
-func summarizeRecords(sourceLang, targetLang string, records []model.Record) (string, error) {
+func summarizeRecords(ctx context.Context, sourceLang, targetLang string, records []model.Record) (string, error) {
 	var b strings.Builder
 	for _, r := range records {
 		fmt.Fprintf(&b, "原文: %s\n译文: %s\n", r.SourceText, r.TranslatedText)
 	}
 	prompt := "请总结以下同声传译会话，输出不超过 120 字的中文摘要，包含主要话题、结论和待办事项：\n" + b.String()
-	return translateSvc.Translate(sourceLang, targetLang, prompt)
+	return translateSvc.Translate(ctx, sourceLang, targetLang, prompt)
 }
 
 func handleDeleteHistory(c *gin.Context) {
@@ -385,12 +385,14 @@ func handleInterpret(c *gin.Context) {
 	}()
 
 	var (
-		asrEngine asr.ASR
-		asrCtx    context.Context
-		asrCancel context.CancelFunc = func() {}
-		audioCh   chan []byte
-		cnt       int
-		writeMu   sync.Mutex
+		asrEngine  asr.ASR
+		asrCtx     context.Context
+		asrCancel  context.CancelFunc = func() {}
+		translator *translationScheduler
+		audioCh    chan []byte
+		cnt        int
+		seq        int64
+		writeMu    sync.Mutex
 	)
 	writeJSON := func(v any) {
 		writeMu.Lock()
@@ -399,6 +401,9 @@ func handleInterpret(c *gin.Context) {
 	}
 	defer func() {
 		asrCancel()
+		if translator != nil {
+			translator.stop()
+		}
 		if asrEngine != nil {
 			asrEngine.Close()
 		}
@@ -462,43 +467,23 @@ func handleInterpret(c *gin.Context) {
 			sourceLang := ses.SourceLang
 			targetLang := ses.TargetLang
 
+			translator = newTranslationScheduler(asrCtx, sessionID, sourceLang, targetLang, translateSvc, sessionStore, writeJSON)
+			translator.start()
+			scheduler := translator
+
 			writeJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
 
 			go func() {
 				for r := range resultCh {
+					seq++
 					writeJSON(gin.H{
 						"type":      "transcript",
+						"seq":       seq,
 						"text":      r.Text,
 						"is_final":  r.IsFinal,
 						"timestamp": time.Now().UnixMilli(),
 					})
-					if r.Text != "" {
-						translated, err := translateSvc.Translate(sourceLang, targetLang, r.Text)
-						payload := gin.H{
-							"type":      "translation",
-							"text":      translated,
-							"is_final":  r.IsFinal,
-							"timestamp": time.Now().UnixMilli(),
-						}
-						if err != nil {
-							log.Printf("[translate] fallback to source text: %v", err)
-							translated = r.Text
-							payload["text"] = translated
-							payload["warning"] = "translate_failed_fallback_to_source"
-						}
-						writeJSON(payload)
-						if r.IsFinal {
-							if err := sessionStore.AddRecord(sessionID, model.Record{
-								SessionID:      sessionID,
-								SourceText:     r.Text,
-								TranslatedText: translated,
-								CreatedAt:      time.Now(),
-							}); err != nil {
-								log.Printf("[db] add record failed: %v", err)
-								writeJSON(gin.H{"type": "error", "message": "database error"})
-							}
-						}
-					}
+					scheduler.submit(translationJob{Seq: seq, Text: r.Text, IsFinal: r.IsFinal})
 				}
 			}()
 
@@ -513,6 +498,10 @@ func handleInterpret(c *gin.Context) {
 
 		case "stop":
 			asrCancel()
+			if translator != nil {
+				translator.stop()
+				translator = nil
+			}
 			writeJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
 			return
 		}

@@ -2,13 +2,11 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"tmk-glance/internal/asr"
@@ -377,135 +375,8 @@ func handleInterpret(c *gin.Context) {
 	}
 	log.Printf("[ws] client connected, session: %s", sessionID)
 
-	// Mark session completed when handler returns.
-	defer func() {
-		if _, err := sessionStore.End(sessionID); err != nil {
-			log.Printf("[db] end session failed: %v", err)
-		}
-	}()
-
-	var (
-		asrEngine  asr.ASR
-		asrCtx     context.Context
-		asrCancel  context.CancelFunc = func() {}
-		translator *translationScheduler
-		audioCh    chan []byte
-		cnt        int
-		seq        int64
-		writeMu    sync.Mutex
-	)
-	writeJSON := func(v any) {
-		writeMu.Lock()
-		conn.WriteJSON(v)
-		writeMu.Unlock()
-	}
-	defer func() {
-		asrCancel()
-		if translator != nil {
-			translator.stop()
-		}
-		if asrEngine != nil {
-			asrEngine.Close()
-		}
-	}()
-
-	for {
-		msgType, msg, err := conn.ReadMessage()
-		if err != nil {
-			asrCancel()
-			break
-		}
-		// binary = raw PCM audio
-		if msgType == websocket.BinaryMessage {
-			if audioCh != nil {
-				audioCh <- msg
-				cnt++
-				if cnt%50 == 1 {
-					log.Printf("[ws] received %d audio chunks", cnt)
-				}
-			}
-			continue
-		}
-		var wsMsg struct {
-			Type       string `json:"type"`
-			SourceLang string `json:"source_lang"`
-			TargetLang string `json:"target_lang"`
-		}
-		json.Unmarshal(msg, &wsMsg)
-
-		switch wsMsg.Type {
-		case "start":
-			ok, err := sessionStore.Activate(sessionID)
-			if err != nil {
-				log.Printf("[db] activate session failed: %v", err)
-				writeJSON(gin.H{"type": "error", "message": "database error"})
-				return
-			}
-			if !ok {
-				writeJSON(gin.H{"type": "error", "message": "session not ready"})
-				continue
-			}
-			ses, _, err := sessionStore.Get(sessionID)
-			if err != nil {
-				log.Printf("[db] get active session failed: %v", err)
-				writeJSON(gin.H{"type": "error", "message": "database error"})
-				return
-			}
-			asrCtx, asrCancel = context.WithCancel(context.Background())
-			asrEngine = newASR(ses.SourceLang)
-			audioCh = make(chan []byte, 8)
-
-			resultCh, err := asrEngine.Recognize(asrCtx, audioCh)
-			if err != nil {
-				if _, dbErr := sessionStore.Fail(sessionID); dbErr != nil {
-					log.Printf("[db] fail session failed: %v", dbErr)
-				}
-				writeJSON(gin.H{"type": "error", "message": err.Error()})
-				return
-			}
-
-			sourceLang := ses.SourceLang
-			targetLang := ses.TargetLang
-
-			translator = newTranslationScheduler(asrCtx, sessionID, sourceLang, targetLang, translateSvc, sessionStore, writeJSON)
-			translator.start()
-			scheduler := translator
-
-			writeJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
-
-			go func() {
-				for r := range resultCh {
-					seq++
-					writeJSON(gin.H{
-						"type":      "transcript",
-						"seq":       seq,
-						"text":      r.Text,
-						"is_final":  r.IsFinal,
-						"timestamp": time.Now().UnixMilli(),
-					})
-					scheduler.submit(translationJob{Seq: seq, Text: r.Text, IsFinal: r.IsFinal})
-				}
-			}()
-
-		case "audio":
-			writeJSON(gin.H{
-				"type":    "error",
-				"message": "audio must be sent as binary PCM frames, not JSON text",
-			})
-
-		case "ping":
-			writeJSON(gin.H{"type": "pong", "timestamp_ms": time.Now().UnixMilli()})
-
-		case "stop":
-			asrCancel()
-			if translator != nil {
-				translator.stop()
-				translator = nil
-			}
-			writeJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
-			return
-		}
-	}
+	actor := newSessionActor(conn, sessionID, sessionStore, translateSvc)
+	actor.run()
 }
 
 // ---------- ASR factory ----------

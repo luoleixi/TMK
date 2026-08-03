@@ -2,4 +2,7 @@
 
 package main
 
-const defaultRuntimeEnvironment = envProduction
+const (
+	defaultRuntimeEnvironment = envProduction
+	productionBuild           = true
+)

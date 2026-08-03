@@ -1,17 +1,25 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 
 	"tmk-glance/internal/config"
 	"tmk-glance/internal/server"
 )
 
 func main() {
-	cfg, err := config.Load("config.yaml")
+	configPath := strings.TrimSpace(os.Getenv("TMK_CONFIG"))
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
@@ -30,11 +38,13 @@ func main() {
 	}()
 
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 	log.Println("[shutdown] shutting down server ...")
 
-	if err := srv.Close(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("shutdown: %s\n", err)
 	}
 }

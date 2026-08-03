@@ -11,11 +11,14 @@ const (
 	envProduction = "production"
 	envTest       = "test"
 
-	productionBackendBaseURL = "http://117.72.159.185:8080"
-	testBackendBaseURL       = "http://127.0.0.1:8080"
+	productionBackendBaseURL = "https://117.72.159.185/tmk-production"
+	testBackendBaseURL       = "https://117.72.159.185/tmk-test"
 )
 
 func runtimeEnvironment() string {
+	if productionBuild {
+		return envProduction
+	}
 	for _, key := range []string{"TMK_ENV", "APP_ENV", "GO_ENV"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			return normalizeEnvironment(value)
@@ -36,6 +39,9 @@ func normalizeEnvironment(value string) string {
 }
 
 func backendBaseURL() string {
+	if productionBuild {
+		return productionBackendBaseURL
+	}
 	if value := strings.TrimSpace(os.Getenv("TMK_BACKEND_URL")); value != "" {
 		return strings.TrimRight(value, "/")
 	}

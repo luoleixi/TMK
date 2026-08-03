@@ -1,0 +1,17 @@
+server:
+  port: ":18080"
+
+storage:
+  driver: mysql
+  db_path: ""
+  dsn: ""
+
+asr:
+  provider: bailian
+  bailian:
+    api_key: ""
+
+translator:
+  provider: bailian
+  bailian:
+    api_key: ""

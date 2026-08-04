@@ -41,15 +41,15 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: TMK-Client/frontend/package-lock.json
+      - name: Build frontend
+        working-directory: TMK-Client/frontend
+        run: npm ci && npm run build
       - name: Test client Go code
         working-directory: TMK-Client
         run: go test ./...
       - name: Test production environment lock
         working-directory: TMK-Client
         run: go test -tags production ./...
-      - name: Build frontend
-        working-directory: TMK-Client/frontend
-        run: npm ci && npm run build
 
   build-server:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

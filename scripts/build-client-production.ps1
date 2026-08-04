@@ -48,6 +48,21 @@ try {
 
     Push-Location $clientRoot
     try {
+        Push-Location "frontend"
+        try {
+            & npm ci
+            if ($LASTEXITCODE -ne 0) {
+                throw "Frontend dependency installation failed"
+            }
+            & npm run build
+            if ($LASTEXITCODE -ne 0) {
+                throw "Production frontend build failed"
+            }
+        }
+        finally {
+            Pop-Location
+        }
+
         & go test -tags production ./...
         if ($LASTEXITCODE -ne 0) {
             throw "Production client tests failed"

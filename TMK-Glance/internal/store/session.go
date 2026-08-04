@@ -99,6 +99,7 @@ func migrateSQLite(db *sql.DB) error {
 			input_type   TEXT NOT NULL DEFAULT 'system_audio',
 			status       TEXT NOT NULL DEFAULT 'ready',
 			record_count INTEGER NOT NULL DEFAULT 0,
+			brief        TEXT NOT NULL DEFAULT '',
 			summary      TEXT NOT NULL DEFAULT '',
 			created_at   TEXT NOT NULL,
 			ended_at     TEXT
@@ -122,6 +123,10 @@ func migrateSQLite(db *sql.DB) error {
 	if err != nil && !isDuplicateColumnError(err) {
 		return err
 	}
+	_, err = db.Exec(`ALTER TABLE sessions ADD COLUMN brief TEXT NOT NULL DEFAULT ''`)
+	if err != nil && !isDuplicateColumnError(err) {
+		return err
+	}
 	return nil
 }
 
@@ -135,6 +140,7 @@ func migrateMySQL(db *sql.DB) error {
 			input_type   VARCHAR(32) NOT NULL DEFAULT 'system_audio',
 			status       VARCHAR(32) NOT NULL DEFAULT 'ready',
 			record_count INT NOT NULL DEFAULT 0,
+			brief        VARCHAR(96) NOT NULL DEFAULT '',
 			summary      TEXT NOT NULL,
 			created_at   VARCHAR(40) NOT NULL,
 			ended_at     VARCHAR(40) NULL,
@@ -165,7 +171,15 @@ func migrateMySQL(db *sql.DB) error {
 	if err != nil && !isDuplicateColumnError(err) {
 		return err
 	}
+	_, err = db.Exec(`ALTER TABLE sessions ADD COLUMN brief VARCHAR(96) NULL`)
+	if err != nil && !isDuplicateColumnError(err) {
+		return err
+	}
 	_, err = db.Exec(`UPDATE sessions SET summary='' WHERE summary IS NULL`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`UPDATE sessions SET brief='' WHERE brief IS NULL`)
 	return err
 }
 
@@ -173,8 +187,8 @@ func (s *SessionStore) Create(ses *model.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO sessions (session_id, source_lang, target_lang, input_type, status, record_count, summary, created_at)
-		 VALUES (?, ?, ?, ?, ?, 0, '', ?)`,
+		`INSERT INTO sessions (session_id, source_lang, target_lang, input_type, status, record_count, brief, summary, created_at)
+		 VALUES (?, ?, ?, ?, ?, 0, '', '', ?)`,
 		ses.ID, ses.SourceLang, ses.TargetLang, ses.InputType, ses.Status, ses.CreatedAt.Format(time.RFC3339Nano),
 	)
 	return err
@@ -188,7 +202,7 @@ func (s *SessionStore) Get(id string) (*model.Session, bool, error) {
 
 func (s *SessionStore) getTx(id string) (*model.Session, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT session_id, source_lang, target_lang, input_type, status, record_count, summary, created_at, ended_at
+		`SELECT session_id, source_lang, target_lang, input_type, status, record_count, brief, summary, created_at, ended_at
 		 FROM sessions WHERE session_id = ?`, id,
 	)
 	return scanSession(row)
@@ -198,7 +212,7 @@ func (s *SessionStore) List() ([]*model.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(
-		`SELECT session_id, source_lang, target_lang, input_type, status, record_count, summary, created_at, ended_at
+		`SELECT session_id, source_lang, target_lang, input_type, status, record_count, brief, summary, created_at, ended_at
 		 FROM sessions ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -226,7 +240,7 @@ func (s *SessionStore) Search(keyword, sourceLang, targetLang string, dateFrom, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `SELECT DISTINCT s.session_id, s.source_lang, s.target_lang, s.input_type, s.status, s.record_count, s.summary, s.created_at, s.ended_at
+	query := `SELECT DISTINCT s.session_id, s.source_lang, s.target_lang, s.input_type, s.status, s.record_count, s.brief, s.summary, s.created_at, s.ended_at
 		FROM sessions s
 		LEFT JOIN records r ON r.session_id = s.session_id
 		WHERE 1=1`
@@ -255,7 +269,7 @@ func (s *SessionStore) Search(keyword, sourceLang, targetLang string, dateFrom, 
 	}
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		add(" AND (s.source_lang LIKE ? OR s.target_lang LIKE ? OR r.source_text LIKE ? OR r.translated_text LIKE ?)", like, like, like, like)
+		add(" AND (s.source_lang LIKE ? OR s.target_lang LIKE ? OR s.brief LIKE ? OR r.source_text LIKE ? OR r.translated_text LIKE ?)", like, like, like, like, like)
 	}
 
 	var total int
@@ -452,6 +466,13 @@ func (s *SessionStore) UpdateSummary(id, summary string) error {
 	return err
 }
 
+func (s *SessionStore) UpdateBrief(id, brief string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE sessions SET brief=? WHERE session_id=? AND brief=''`, brief, id)
+	return err
+}
+
 // Close closes the database connection.
 func (s *SessionStore) Close() error {
 	return s.db.Close()
@@ -467,11 +488,12 @@ func scanSession(row interface{ Scan(...interface{}) error }) (*model.Session, b
 		inputType    string
 		status       string
 		recordCount  int
+		brief        sql.NullString
 		summary      sql.NullString
 		createdAtStr string
 		endedAtStr   sql.NullString
 	)
-	if err := row.Scan(&id, &sourceLang, &targetLang, &inputType, &status, &recordCount, &summary, &createdAtStr, &endedAtStr); err != nil {
+	if err := row.Scan(&id, &sourceLang, &targetLang, &inputType, &status, &recordCount, &brief, &summary, &createdAtStr, &endedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, false, nil
 		}
@@ -488,6 +510,7 @@ func scanSession(row interface{ Scan(...interface{}) error }) (*model.Session, b
 		InputType:   inputType,
 		Status:      status,
 		RecordCount: recordCount,
+		Brief:       brief.String,
 		Summary:     summary.String,
 		CreatedAt:   createdAt,
 	}

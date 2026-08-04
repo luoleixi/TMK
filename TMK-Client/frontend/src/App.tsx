@@ -48,6 +48,7 @@ type HistorySession = {
   source_lang: string;
   target_lang: string;
   record_count: number;
+  brief?: string;
   summary?: string;
   created_at: string;
 };
@@ -137,6 +138,7 @@ function MainApp() {
   const [historyDateFrom, setHistoryDateFrom] = useState('');
   const [historyDateTo, setHistoryDateTo] = useState('');
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
+  const briefPollAttempts = useRef(0);
 
   useEffect(() => {
     const offTranscript = Events.On('transcript', (event: any) => {
@@ -272,6 +274,7 @@ function MainApp() {
   // ---- history ----
 
   const loadHistoryList = async () => {
+    briefPollAttempts.current = 0;
     setHistoryLoading(true);
     try {
       const from = historyDateFrom ? new Date(historyDateFrom + 'T00:00:00').toISOString() : '';
@@ -283,6 +286,27 @@ function MainApp() {
       setHistoryLoading(false);
     }
   };
+
+  useEffect(() => {
+    const hasPendingBriefs = historySessions.some(session => !session.brief && session.record_count > 0);
+    if (view !== 'history' || historyLoading || !hasPendingBriefs || briefPollAttempts.current >= 4) {
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      briefPollAttempts.current += 1;
+      const from = historyDateFrom ? new Date(historyDateFrom + 'T00:00:00').toISOString() : '';
+      const to = historyDateTo ? new Date(historyDateTo + 'T23:59:59').toISOString() : '';
+      try {
+        const result = await (SessionService as any).SearchHistory(0, 50, historyKeyword.trim(), from, to);
+        setHistorySessions(result[0] || []);
+      } catch {
+        // The normal search action remains available if a background refresh fails.
+      }
+    }, 3500);
+
+    return () => window.clearTimeout(timer);
+  }, [view, historyLoading, historySessions, historyKeyword, historyDateFrom, historyDateTo]);
 
   const handleExpand = async (sessionId: string) => {
     if (expandedId === sessionId) {
@@ -593,6 +617,12 @@ function MainApp() {
                     >
                       <strong>{langName(session.source_lang)} <span>→</span> {langName(session.target_lang)}</strong>
                       <small>{formatTime(session.created_at)}</small>
+                      <span className={session.brief ? 'history-brief' : 'history-brief pending'}>
+                        <Sparkles size={12} />
+                        <span title={session.brief || undefined}>
+                          {session.brief || (session.record_count > 0 ? 'AI 总结生成中...' : '暂无可总结内容')}
+                        </span>
+                      </span>
                     </button>
                     <span className="record-count">{session.record_count} 条</span>
                     <button className="icon-only danger" title="删除会话" onClick={() => deleteHistory([session.id])}><Trash2 size={17} /></button>

@@ -111,8 +111,10 @@ func (a *sessionActor) cleanup() {
 			log.Printf("[asr] close failed, session=%s err=%v", a.sessionID, err)
 		}
 	}
-	if _, err := a.store.End(a.sessionID); err != nil {
+	if ended, err := a.store.End(a.sessionID); err != nil {
 		log.Printf("[db] end session failed: %v", err)
+	} else if ended {
+		queueSessionBrief(a.sessionID)
 	}
 }
 

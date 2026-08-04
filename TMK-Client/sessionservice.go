@@ -242,6 +242,7 @@ type HistorySession struct {
 	TargetLang  string `json:"target_lang"`
 	Status      string `json:"status"`
 	RecordCount int    `json:"record_count"`
+	Brief       string `json:"brief,omitempty"`
 	CreatedAt   string `json:"created_at"`
 	EndedAt     string `json:"ended_at,omitempty"`
 }

@@ -590,7 +590,7 @@ select:disabled {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto 34px;
   align-items: center;
-  min-height: 64px;
+  min-height: 82px;
   gap: 12px;
   padding: 10px 12px;
 }
@@ -626,6 +626,34 @@ select:disabled {
   margin-top: 5px;
   color: #7d898e;
   font-size: 11px;
+}
+
+.history-brief {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  margin-top: 7px;
+  color: #176b54;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.history-brief svg {
+  flex: 0 0 auto;
+}
+
+.history-brief span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-brief.pending {
+  color: #7d898e;
+  font-weight: 400;
 }
 
 .record-count {

@@ -11,5 +11,10 @@ CLAUDE.md
 # Build output
 build/
 
+# Wails build templates are source inputs required by clean CI runners.
+!TMK-Client/build/
+!TMK-Client/build/**
+TMK-Client/build/*.exe
+
 # Config (contains API keys)
 config.yaml

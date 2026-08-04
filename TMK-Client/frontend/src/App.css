@@ -609,6 +609,9 @@ select:disabled {
 .history-main strong,
 .history-main small {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .history-main strong {
@@ -628,6 +631,7 @@ select:disabled {
 .record-count {
   color: #69767c;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .icon-only.danger {
@@ -677,26 +681,34 @@ select:disabled {
 
 .history-message {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 9px;
-  padding: 10px 0;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 0;
   border-bottom: 1px solid #e1e6e7;
 }
 
 .history-message > span {
+  padding-top: 2px;
   color: #899398;
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.history-message-copy {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
 }
 
 .history-message p {
   margin: 0;
+  min-width: 0;
   overflow-wrap: anywhere;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.65;
 }
 
 .history-message p + p {
-  margin-top: 3px;
   color: #177054;
   font-weight: 600;
 }
@@ -817,5 +829,41 @@ body.subtitle-window #root {
 
   .search-field {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .history-list {
+    padding: 12px 14px 22px;
+  }
+
+  .history-row {
+    grid-template-columns: 20px minmax(0, 1fr) 34px;
+    gap: 8px;
+    padding: 9px 10px;
+  }
+
+  .record-count {
+    display: none;
+  }
+
+  .history-detail {
+    padding: 12px 14px 16px;
+  }
+
+  .history-message {
+    grid-template-columns: 24px minmax(0, 1fr);
+    gap: 8px;
+    padding: 11px 0;
+  }
+
+  .history-message-copy {
+    gap: 4px;
+  }
+
+  .history-message p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }

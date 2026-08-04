@@ -12,6 +12,7 @@ import type * as main$0 from "../../../../../changeme/models.js";
 declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
+            "shortcut": string;
             "time": string;
             "transcript": main$0.TranscriptMsg;
             "translation": main$0.TranslationMsg;

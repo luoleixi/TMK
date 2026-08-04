@@ -5,6 +5,35 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
+export class ExportRecord {
+    "source_text": string;
+    "translated_text": string;
+    "sequence": number;
+
+    /** Creates a new ExportRecord instance. */
+    constructor($$source: Partial<ExportRecord> = {}) {
+        if (!("source_text" in $$source)) {
+            this["source_text"] = "";
+        }
+        if (!("translated_text" in $$source)) {
+            this["translated_text"] = "";
+        }
+        if (!("sequence" in $$source)) {
+            this["sequence"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ExportRecord instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ExportRecord {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ExportRecord($$parsedSource as Partial<ExportRecord>);
+    }
+}
+
 export class HistoryDetail {
     "session_id": string;
     "source_lang": string;
@@ -46,10 +75,10 @@ export class HistoryDetail {
      * Creates a new HistoryDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): HistoryDetail {
-        const $$createField6_0 = $$createType1;
+        const $$createField7_0 = $$createType1;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("records" in $$parsedSource) {
-            $$parsedSource["records"] = $$createField6_0($$parsedSource["records"]);
+            $$parsedSource["records"] = $$createField7_0($$parsedSource["records"]);
         }
         return new HistoryDetail($$parsedSource as Partial<HistoryDetail>);
     }
@@ -110,7 +139,7 @@ export class HistorySession {
     "target_lang": string;
     "status": string;
     "record_count": number;
-    "summary"?: string;
+    "brief"?: string;
     "created_at": string;
     "ended_at"?: string;
 
@@ -202,6 +231,51 @@ export class TranslationMsg {
     static createFrom($$source: any = {}): TranslationMsg {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new TranslationMsg($$parsedSource as Partial<TranslationMsg>);
+    }
+}
+
+export class UserSettings {
+    "source_lang": string;
+    "target_lang": string;
+    "selected_device": number;
+    "subtitle_mounted": boolean;
+    "history_keyword": string;
+    "history_date_from": string;
+    "history_date_to": string;
+
+    /** Creates a new UserSettings instance. */
+    constructor($$source: Partial<UserSettings> = {}) {
+        if (!("source_lang" in $$source)) {
+            this["source_lang"] = "";
+        }
+        if (!("target_lang" in $$source)) {
+            this["target_lang"] = "";
+        }
+        if (!("selected_device" in $$source)) {
+            this["selected_device"] = 0;
+        }
+        if (!("subtitle_mounted" in $$source)) {
+            this["subtitle_mounted"] = false;
+        }
+        if (!("history_keyword" in $$source)) {
+            this["history_keyword"] = "";
+        }
+        if (!("history_date_from" in $$source)) {
+            this["history_date_from"] = "";
+        }
+        if (!("history_date_to" in $$source)) {
+            this["history_date_to"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new UserSettings instance from a string or object.
+     */
+    static createFrom($$source: any = {}): UserSettings {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new UserSettings($$parsedSource as Partial<UserSettings>);
     }
 }
 

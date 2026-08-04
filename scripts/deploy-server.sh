@@ -75,7 +75,17 @@ if [[ -e ${release_dir} ]]; then
   exit 1
 fi
 install -d -m 0755 -o root -g root "${release_dir}"
-install -m 0755 -o root -g root "${artifact}" "${release_dir}/tmk-glance"
+case "${artifact}" in
+  *.gz)
+    gzip -t "${artifact}"
+    gzip -dc "${artifact}" >"${release_dir}/tmk-glance"
+    chown root:root "${release_dir}/tmk-glance"
+    chmod 0755 "${release_dir}/tmk-glance"
+    ;;
+  *)
+    install -m 0755 -o root -g root "${artifact}" "${release_dir}/tmk-glance"
+    ;;
+esac
 
 rm -f "${next_link}"
 ln -s "${release_dir}" "${next_link}"

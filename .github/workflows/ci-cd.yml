@@ -3,8 +3,12 @@ name: CI and Test Deployment
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
   workflow_dispatch:
 
 permissions:
@@ -81,7 +85,7 @@ jobs:
     environment: test
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: tmk-glance-linux
           path: dist
@@ -101,8 +105,9 @@ jobs:
           RELEASE_ID: ${{ github.sha }}
         run: |
           chmod 755 dist/tmk-glance
-          checksum=$(sha256sum dist/tmk-glance | awk '{print $1}')
-          remote_artifact="/var/lib/tmk-deploy/test/tmk-glance-${RELEASE_ID}"
-          scp dist/tmk-glance "${USER}@${HOST}:${remote_artifact}"
+          gzip -9 -c dist/tmk-glance > dist/tmk-glance.gz
+          checksum=$(sha256sum dist/tmk-glance.gz | awk '{print $1}')
+          remote_artifact="/var/lib/tmk-deploy/test/tmk-glance-${RELEASE_ID}.gz"
+          scp dist/tmk-glance.gz "${USER}@${HOST}:${remote_artifact}"
           ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-test "${remote_artifact}" "${checksum}" "${RELEASE_ID}"
           curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/api/health"

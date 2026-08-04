@@ -586,7 +586,11 @@ function MainApp() {
                       checked={selectedHistoryIds.includes(session.id)}
                       onChange={event => toggleHistorySelection(session.id, event.target.checked)}
                     />
-                    <button className="history-main" onClick={() => handleExpand(session.id)}>
+                    <button
+                      className="history-main"
+                      onClick={() => handleExpand(session.id)}
+                      title={`${langName(session.source_lang)} → ${langName(session.target_lang)} · ${formatTime(session.created_at)}`}
+                    >
                       <strong>{langName(session.source_lang)} <span>→</span> {langName(session.target_lang)}</strong>
                       <small>{formatTime(session.created_at)}</small>
                     </button>
@@ -607,7 +611,10 @@ function MainApp() {
                         {historyRecords.map((record, index) => (
                           <div className="history-message" key={record.id}>
                             <span>{String(index + 1).padStart(2, '0')}</span>
-                            <div><p>{record.source_text}</p><p>{record.translated_text}</p></div>
+                            <div className="history-message-copy">
+                              <p title={record.source_text}>{record.source_text}</p>
+                              <p title={record.translated_text}>{record.translated_text}</p>
+                            </div>
                           </div>
                         ))}
                       </div>

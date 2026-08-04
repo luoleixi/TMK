@@ -19,12 +19,11 @@ $managedEnvironmentVariables = @(
 $originalEnvironment = @{}
 
 foreach ($name in $managedEnvironmentVariables) {
-    $value = [Environment]::GetEnvironmentVariable($name, "Process")
-    $originalEnvironment[$name] = $value
+    $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
 }
 
 try {
-    $env:TMK_ENV = "production"
+    $env:TMK_ENV = "test"
     Remove-Item Env:APP_ENV -ErrorAction SilentlyContinue
     Remove-Item Env:GO_ENV -ErrorAction SilentlyContinue
     Remove-Item Env:TMK_BACKEND_URL -ErrorAction SilentlyContinue
@@ -36,13 +35,13 @@ try {
     New-Item -ItemType Directory -Force $env:GOCACHE, $env:GOMODCACHE, $env:GOTMPDIR | Out-Null
 
     $source = Get-Content -Raw -Encoding utf8 $backendConfigPath
-    $match = [regex]::Match($source, 'productionBackendBaseURL\s*=\s*"([^"]+)"')
+    $match = [regex]::Match($source, 'testBackendBaseURL\s*=\s*"([^"]+)"')
     if (-not $match.Success) {
-        throw "Cannot find productionBackendBaseURL in $backendConfigPath"
+        throw "Cannot find testBackendBaseURL in $backendConfigPath"
     }
-    $productionUri = [Uri]$match.Groups[1].Value
-    if ($productionUri.Host -in @("localhost", "127.0.0.1", "::1") -or $productionUri.Port -eq 18080) {
-        throw "Production backend points to a test or loopback endpoint: $productionUri"
+    $testUri = [Uri]$match.Groups[1].Value
+    if ($testUri.Host -in @("localhost", "127.0.0.1", "::1") -or $testUri.AbsoluteUri -notmatch '/tmk-test/?$') {
+        throw "Test backend does not point to the shared test endpoint: $testUri"
     }
 
     Push-Location $clientRoot
@@ -55,64 +54,60 @@ try {
             }
             & npm run build
             if ($LASTEXITCODE -ne 0) {
-                throw "Production frontend build failed"
+                throw "Test frontend build failed"
             }
         }
         finally {
             Pop-Location
         }
 
-        & go test -tags production ./...
+        & go test ./...
         if ($LASTEXITCODE -ne 0) {
-            throw "Production client tests failed"
+            throw "Test client tests failed"
         }
 
-        & wails3 task build
+        & wails3 task build DEV=true APP_NAME=tmk-client-test
         if ($LASTEXITCODE -ne 0) {
-            throw "Production client build failed"
+            throw "Test client build failed"
         }
     }
     finally {
         Pop-Location
     }
 
-    $artifact = Join-Path $clientRoot "bin\tmk-client.exe"
+    $artifact = Join-Path $clientRoot "bin\tmk-client-test.exe"
     if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) {
-        throw "Expected client artifact was not produced: $artifact"
+        throw "Expected test client artifact was not produced: $artifact"
     }
 
     if ([string]::IsNullOrWhiteSpace($Version)) {
-        $Version = (& git -C $repoRoot describe --tags --always).Trim()
+        $Version = "test-" + (& git -C $repoRoot rev-parse --short HEAD).Trim()
     }
     if ($Version -notmatch '^[A-Za-z0-9._-]+$') {
         throw "Version contains unsupported path characters: $Version"
     }
+
     $commit = (& git -C $repoRoot rev-parse HEAD).Trim()
     $metadata = [ordered]@{
         version = $Version
         commit = $commit
-        environment = "production"
-        backend = $productionUri.AbsoluteUri.TrimEnd("/")
+        environment = "test"
+        backend = $testUri.AbsoluteUri.TrimEnd("/")
         built_at_utc = [DateTime]::UtcNow.ToString("o")
         artifact_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifact).Hash.ToLowerInvariant()
     }
 
-    $OutputDirectory = Join-Path $clientRoot "bin\release\$Version"
-    New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-    $releaseArtifact = Join-Path $OutputDirectory "TMK-Client-$Version.exe"
+    $outputDirectory = Join-Path $clientRoot "bin\test\$Version"
+    New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+    $releaseArtifact = Join-Path $outputDirectory "TMK-Client-Test-$Version.exe"
     Copy-Item -LiteralPath $artifact -Destination $releaseArtifact -Force
-    $metadata | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $OutputDirectory "build-metadata.json")
+    $metadata | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $outputDirectory "build-metadata.json")
 
-    Write-Host "Production client created: $releaseArtifact"
+    Write-Host "Test client created: $releaseArtifact"
 }
 finally {
     foreach ($name in $managedEnvironmentVariables) {
         $value = $originalEnvironment[$name]
-        if ($null -eq $value) {
-            [Environment]::SetEnvironmentVariable($name, $null, "Process")
-        }
-        else {
-            [Environment]::SetEnvironmentVariable($name, $value, "Process")
-        }
+        [Environment]::SetEnvironmentVariable($name, $value, "Process")
     }
 }

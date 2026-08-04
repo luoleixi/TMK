@@ -129,11 +129,16 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: TMK-Client-${{ inputs.version }}
-          path: TMK-Client/bin/release/*
+          path: TMK-Client/bin/release/${{ inputs.version }}/*
           if-no-files-found: error
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
         shell: pwsh
-        run: gh release create $env:VERSION TMK-Client/bin/release/* --target $env:GITHUB_SHA --generate-notes
+        run: |
+          $releaseFiles = Get-ChildItem "TMK-Client/bin/release/$env:VERSION" -File | ForEach-Object FullName
+          if ($releaseFiles.Count -eq 0) {
+            throw "No release files found"
+          }
+          gh release create $env:VERSION $releaseFiles --target $env:GITHUB_SHA --generate-notes

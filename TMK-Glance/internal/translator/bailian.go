@@ -44,13 +44,20 @@ func (t *bailianTranslator) Translate(ctx context.Context, sourceLang, targetLan
 	}
 
 	prompt := fmt.Sprintf("将以下%s文本翻译成%s，只返回翻译结果，不要解释：%s", srcName, tgtName, text)
+	return t.Generate(ctx, "你是一个翻译助手，只返回翻译结果。", prompt)
+}
+
+func (t *bailianTranslator) Generate(ctx context.Context, systemPrompt, text string) (string, error) {
+	if text == "" {
+		return "", nil
+	}
 
 	reqBody := map[string]any{
 		"model": "qwen-turbo",
 		"input": map[string]any{
 			"messages": []map[string]string{
-				{"role": "system", "content": "你是一个翻译助手，只返回翻译结果。"},
-				{"role": "user", "content": prompt},
+				{"role": "system", "content": systemPrompt},
+				{"role": "user", "content": text},
 			},
 		},
 	}

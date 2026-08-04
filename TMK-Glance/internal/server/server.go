@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"tmk-glance/internal/asr"
@@ -28,6 +29,7 @@ var upgrader = websocket.Upgrader{
 
 var sessionStore *store.SessionStore
 var translateSvc translator.Translator
+var briefJobs sync.Map
 
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	asrCfg = cfg
@@ -158,6 +160,7 @@ func handleStopSession(c *gin.Context) {
 		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
 		return
 	}
+	queueSessionBrief(c.Param("id"))
 	c.JSON(200, gin.H{"code": 0, "message": "ok"})
 }
 
@@ -217,6 +220,11 @@ func handleListHistory(c *gin.Context) {
 		c.JSON(500, gin.H{"code": 500, "message": "list history failed"})
 		return
 	}
+	for _, ses := range filtered {
+		if ses.Brief == "" && ses.RecordCount > 0 && ses.Status != "active" {
+			queueSessionBrief(ses.ID)
+		}
+	}
 
 	c.JSON(200, gin.H{
 		"code":    0,
@@ -256,6 +264,7 @@ func handleGetHistory(c *gin.Context) {
 			"source_lang":      ses.SourceLang,
 			"target_lang":      ses.TargetLang,
 			"duration_seconds": durationSeconds(ses),
+			"brief":            ses.Brief,
 			"summary":          ses.Summary,
 			"created_at":       ses.CreatedAt,
 			"ended_at":         ses.EndedAt,
@@ -289,7 +298,7 @@ func handleSummarizeHistory(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 400, "message": "no records to summarize"})
 		return
 	}
-	summary, err := summarizeRecords(c.Request.Context(), ses.SourceLang, ses.TargetLang, records)
+	summary, err := summarizeRecords(c.Request.Context(), records)
 	if err != nil {
 		log.Printf("[summary] generate failed: %v", err)
 		c.JSON(502, gin.H{"code": 502, "message": err.Error()})
@@ -303,13 +312,90 @@ func handleSummarizeHistory(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"summary": summary}})
 }
 
-func summarizeRecords(ctx context.Context, sourceLang, targetLang string, records []model.Record) (string, error) {
+func summarizeRecords(ctx context.Context, records []model.Record) (string, error) {
+	content := buildConversationText(records, true)
+	systemPrompt := "你是同声传译会话摘要助手。请使用中文输出不超过120字的摘要，包含主要话题、结论和待办事项；只返回摘要正文。"
+	return translateSvc.Generate(ctx, systemPrompt, content)
+}
+
+func generateBrief(ctx context.Context, records []model.Record) (string, error) {
+	content := buildConversationText(records, false)
+	systemPrompt := "你是会话主题命名助手。请用8到24个中文字符概括会话主要内容，输出一个简短主题短语，不要写‘总结’或‘摘要’，不要解释。"
+	brief, err := translateSvc.Generate(ctx, systemPrompt, content)
+	if err != nil {
+		return "", err
+	}
+	brief = normalizeBrief(brief)
+	if brief == "" {
+		return "", fmt.Errorf("empty brief")
+	}
+	return brief, nil
+}
+
+func buildConversationText(records []model.Record, includeTranslation bool) string {
 	var b strings.Builder
 	for _, r := range records {
-		fmt.Fprintf(&b, "原文: %s\n译文: %s\n", r.SourceText, r.TranslatedText)
+		if includeTranslation {
+			fmt.Fprintf(&b, "原文：%s\n译文：%s\n", r.SourceText, r.TranslatedText)
+		} else if strings.TrimSpace(r.SourceText) != "" {
+			b.WriteString(r.SourceText)
+			b.WriteByte('\n')
+		}
 	}
-	prompt := "请总结以下同声传译会话，输出不超过 120 字的中文摘要，包含主要话题、结论和待办事项：\n" + b.String()
-	return translateSvc.Translate(ctx, sourceLang, targetLang, prompt)
+	return truncateRunes(strings.TrimSpace(b.String()), 8000)
+}
+
+func normalizeBrief(value string) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	value = strings.Trim(value, "\"'“”‘’ ")
+	for _, prefix := range []string{"AI总结：", "AI 总结：", "总结：", "摘要：", "主题："} {
+		value = strings.TrimSpace(strings.TrimPrefix(value, prefix))
+	}
+	value = strings.TrimRight(value, "。！？.!?；;，,")
+	return truncateRunes(value, 24)
+}
+
+func truncateRunes(value string, max int) string {
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max])
+}
+
+func queueSessionBrief(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	if _, loaded := briefJobs.LoadOrStore(sessionID, struct{}{}); loaded {
+		return
+	}
+	go func() {
+		defer briefJobs.Delete(sessionID)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		ses, ok, err := sessionStore.Get(sessionID)
+		if err != nil || !ok || ses.Brief != "" || ses.RecordCount == 0 {
+			if err != nil {
+				log.Printf("[brief] get session failed, session=%s err=%v", sessionID, err)
+			}
+			return
+		}
+		records, _, err := sessionStore.Records(sessionID)
+		if err != nil {
+			log.Printf("[brief] get records failed, session=%s err=%v", sessionID, err)
+			return
+		}
+		brief, err := generateBrief(ctx, records)
+		if err != nil {
+			log.Printf("[brief] generate failed, session=%s err=%v", sessionID, err)
+			return
+		}
+		if err := sessionStore.UpdateBrief(sessionID, brief); err != nil {
+			log.Printf("[brief] save failed, session=%s err=%v", sessionID, err)
+		}
+	}()
 }
 
 func handleDeleteHistory(c *gin.Context) {

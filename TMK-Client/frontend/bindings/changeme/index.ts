@@ -3,21 +3,23 @@
 
 import * as CaptureService from "./captureservice.js";
 import * as ExportService from "./exportservice.js";
-import * as SettingsService from "./settingsservice.js";
 import * as SessionService from "./sessionservice.js";
+import * as SettingsService from "./settingsservice.js";
 import * as WindowService from "./windowservice.js";
 export {
     CaptureService,
     ExportService,
-    SettingsService,
     SessionService,
+    SettingsService,
     WindowService
 };
 
 export {
+    ExportRecord,
     HistoryDetail,
     HistoryRecord,
     HistorySession,
     TranscriptMsg,
-    TranslationMsg
+    TranslationMsg,
+    UserSettings
 } from "./models.js";

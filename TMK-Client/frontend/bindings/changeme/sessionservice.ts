@@ -17,11 +17,11 @@ export function CreateSession(sourceLang: string, targetLang: string, inputType:
 }
 
 export function DeleteHistory(sessionID: string): $CancellablePromise<void> {
-    return $Call.ByName("main.SessionService.DeleteHistory", sessionID);
+    return $Call.ByID(4177947542, sessionID);
 }
 
 export function DeleteHistoryBatch(ids: string[]): $CancellablePromise<number> {
-    return $Call.ByName("main.SessionService.DeleteHistoryBatch", ids);
+    return $Call.ByID(1982723042, ids);
 }
 
 /**
@@ -58,7 +58,7 @@ export function ResumeInterpret(): $CancellablePromise<void> {
 }
 
 export function SearchHistory(offset: number, limit: number, keyword: string, dateFrom: string, dateTo: string): $CancellablePromise<[$models.HistorySession[], number]> {
-    return $Call.ByName("main.SessionService.SearchHistory", offset, limit, keyword, dateFrom, dateTo).then(($result: any) => {
+    return $Call.ByID(641781247, offset, limit, keyword, dateFrom, dateTo).then(($result: any) => {
         $result[0] = $$createType3($result[0]);
         return $result;
     });
@@ -78,15 +78,15 @@ export function StartInterpret(): $CancellablePromise<void> {
     return $Call.ByID(2067849448);
 }
 
-export function SummarizeHistory(sessionID: string): $CancellablePromise<string> {
-    return $Call.ByName("main.SessionService.SummarizeHistory", sessionID);
-}
-
 /**
  * StopInterpret ends the translation session
  */
 export function StopInterpret(): $CancellablePromise<void> {
     return $Call.ByID(3294272606);
+}
+
+export function SummarizeHistory(sessionID: string): $CancellablePromise<string> {
+    return $Call.ByID(1733707310, sessionID);
 }
 
 // Private type creation functions

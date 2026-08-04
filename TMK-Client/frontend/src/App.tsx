@@ -1,6 +1,24 @@
 import { useState, useEffect, useRef } from 'react';
 import { SessionService, CaptureService, SettingsService, ExportService, WindowService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
+import {
+  ArrowRightLeft,
+  Captions,
+  Download,
+  FileText,
+  History,
+  MessageSquareText,
+  Mic,
+  Pause,
+  Play,
+  Radio,
+  Search,
+  Sparkles,
+  Square,
+  Trash2,
+  Volume2,
+} from 'lucide-react';
+import './App.css';
 
 const LANGUAGES = [
   { code: 'zh', name: '中文' },
@@ -124,6 +142,7 @@ function MainApp() {
   const sourceTextRef = useRef('');
   const lastSourceRef = useRef('');
   const settingsReady = useRef(false);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   // ---- history state ----
   const [view, setView] = useState<'live' | 'history'>('live');
@@ -213,6 +232,9 @@ function MainApp() {
         await (SessionService as any).ResumeInterpret();
       } else {
         setStatus('创建会话中...');
+        setRecords([]);
+        setSourceText('');
+        setTranslatedText('');
         sessionIdRef.current = await SessionService.CreateSession(sourceLang, targetLang, inputType());
         await SessionService.StartInterpret();
       }
@@ -384,245 +406,237 @@ function MainApp() {
     return () => offShortcut();
   }, [running, paused, sourceLang, targetLang, selectedDevice]);
 
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [records, sourceText, translatedText]);
+
+  const swapLanguages = () => {
+    setSourceLang(targetLang);
+    setTargetLang(sourceLang);
+  };
+
+  const showLiveDraft = Boolean(sourceText) && sourceText !== lastSourceRef.current;
+  const statusTone = running ? 'running' : paused ? 'paused' : 'idle';
+
   return (
-    <div style={{ maxWidth: 600, margin: '0 auto', padding: 24, fontFamily: 'sans-serif' }}>
-      <h1 style={{ textAlign: 'center' }}>TMK 同声传译</h1>
-
-      {/* Tab bar */}
-      <div style={{ display: 'flex', marginBottom: 16, borderBottom: '2px solid #333' }}>
-        {(['live', 'history'] as const).map(v => (
-          <button
-            key={v}
-            onClick={() => handleViewChange(v)}
-            style={{
-              flex: 1, padding: '8px 0', fontSize: 16, cursor: 'pointer',
-              background: 'none', border: 'none',
-              borderBottom: view === v ? '2px solid #4ec9b0' : '2px solid transparent',
-              color: view === v ? '#4ec9b0' : '#888',
-              marginBottom: -2,
-            }}
-          >
-            {v === 'live' ? '实时翻译' : '历史记录'}
-          </button>
-        ))}
-      </div>
-
-      {view === 'live' && (
-        <>
-          <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-            <label style={{ flex: 1 }}>
-              源语言
-              <select value={sourceLang} onChange={e => setSourceLang(e.target.value)}
-                style={{ width: '100%', padding: 8, marginTop: 4 }}>
-                {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
-              </select>
-            </label>
-            <label style={{ flex: 1 }}>
-              目标语言
-              <select value={targetLang} onChange={e => setTargetLang(e.target.value)}
-                style={{ width: '100%', padding: 8, marginTop: 4 }}>
-                {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
-              </select>
-            </label>
-          </div>
-
-          <div style={{ marginBottom: 16 }}>
-            <label>
-              音频来源
-              <select value={selectedDevice} onChange={e => handleDeviceChange(Number(e.target.value))}
-                style={{ width: '100%', padding: 8, marginTop: 4 }}>
-                {devices.map(d => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-            <input
-              type="checkbox"
-              checked={subtitleMounted}
-              onChange={e => setSubtitleMounted(e.target.checked)}
-            />
-            挂载字幕
-          </label>
-
-          <div style={{ textAlign: 'center', marginBottom: 16 }}>
-            {!running && !paused ? (
-              <button onClick={handleStart}
-                style={{
-                  padding: '12px 48px', fontSize: 18, cursor: 'pointer',
-                  background: '#2ecc71', color: '#fff', border: 'none', borderRadius: 8,
-                }}>
-                开始翻译
-              </button>
-            ) : null}
-
-            {running && !paused ? (
-              <>
-                <button onClick={handlePause}
-                  style={{
-                    padding: '12px 48px', fontSize: 18, cursor: 'pointer',
-                    background: '#f39c12', color: '#fff', border: 'none', borderRadius: 8,
-                    marginRight: 16,
-                  }}>
-                  暂停
-                </button>
-                <button onClick={handleStop}
-                  style={{
-                    padding: '12px 48px', fontSize: 18, cursor: 'pointer',
-                    background: '#e74c3c', color: '#fff', border: 'none', borderRadius: 8,
-                  }}>
-                  停止
-                </button>
-              </>
-            ) : null}
-
-            {paused ? (
-              <>
-                <button onClick={handleStart}
-                  style={{
-                    padding: '12px 48px', fontSize: 18, cursor: 'pointer',
-                    background: '#2ecc71', color: '#fff', border: 'none', borderRadius: 8,
-                    marginRight: 16,
-                  }}>
-                  继续
-                </button>
-                <button onClick={handleStop}
-                  style={{
-                    padding: '12px 48px', fontSize: 18, cursor: 'pointer',
-                    background: '#e74c3c', color: '#fff', border: 'none', borderRadius: 8,
-                  }}>
-                  停止
-                </button>
-              </>
-            ) : null}
-
-            <p style={{ color: '#888', marginTop: 8 }}>{status}</p>
-          </div>
-
-          {subtitleMounted && (
-            <div style={{ background: '#1e1e1e', color: '#fff', borderRadius: 8, padding: 16, minHeight: 80, marginBottom: 16 }}>
-              <p style={{ margin: 0, fontSize: 20 }}>{sourceText || '等待语音输入...'}</p>
-              <p style={{ margin: '4px 0 0', fontSize: 18, color: '#4ec9b0' }}>
-                {translatedText || ''}
-              </p>
-            </div>
-          )}
-
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand-block">
+          <div className="brand-mark"><Radio size={19} strokeWidth={2.4} /></div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <h3>翻译记录</h3>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => exportRecords('txt', 'live-session', liveExportRecords())}>导出 TXT</button>
-                <button onClick={() => exportRecords('srt', 'live-session', liveExportRecords())}>导出 SRT</button>
-              </div>
-            </div>
-            {records.length === 0 ? (
-              <p style={{ color: '#888' }}>暂无记录</p>
-            ) : (
-              records.map(r => (
-                <div key={r.id} style={{ borderBottom: '1px solid #ddd', padding: '8px 0' }}>
-                  <span>{r.sourceText}</span>
-                  <span style={{ margin: '0 8px', color: '#aaa' }}>→</span>
-                  <span style={{ color: '#2ecc71' }}>{r.translatedText}</span>
-                </div>
-              ))
-            )}
+            <strong>TMK</strong>
+            <span>同声传译</span>
           </div>
-        </>
-      )}
-
-      {view === 'history' && (
-        <div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 140px auto', gap: 8, marginBottom: 16 }}>
-            <input
-              value={historyKeyword}
-              onChange={e => setHistoryKeyword(e.target.value)}
-              placeholder="关键词"
-              style={{ padding: 8 }}
-            />
-            <input
-              type="date"
-              value={historyDateFrom}
-              onChange={e => setHistoryDateFrom(e.target.value)}
-              style={{ padding: 8 }}
-            />
-            <input
-              type="date"
-              value={historyDateTo}
-              onChange={e => setHistoryDateTo(e.target.value)}
-              style={{ padding: 8 }}
-            />
-            <button onClick={loadHistoryList}>搜索</button>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-            <button onClick={() => deleteHistory(selectedHistoryIds)} disabled={selectedHistoryIds.length === 0}>
-              删除选中
-            </button>
-          </div>
-          {historyLoading ? (
-            <p style={{ color: '#888', textAlign: 'center' }}>加载中...</p>
-          ) : historySessions.length === 0 ? (
-            <p style={{ color: '#888', textAlign: 'center' }}>暂无历史记录</p>
-          ) : (
-            historySessions.map(ses => (
-              <div key={ses.id}>
-                <div
-                  style={{
-                    cursor: 'pointer', padding: 12, marginBottom: 8,
-                    background: '#1e1e1e', borderRadius: 8,
-                    border: expandedId === ses.id ? '1px solid #4ec9b0' : '1px solid #333',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff', fontSize: 15 }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedHistoryIds.includes(ses.id)}
-                        onChange={e => toggleHistorySelection(ses.id, e.target.checked)}
-                      />
-                      <span onClick={() => handleExpand(ses.id)}>
-                        {langName(ses.source_lang)} → {langName(ses.target_lang)}
-                      </span>
-                    </label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ color: '#888', fontSize: 13 }}>
-                        {ses.record_count} 条记录 · {formatTime(ses.created_at)}
-                      </span>
-                      <button onClick={() => deleteHistory([ses.id])}>删除</button>
-                    </div>
-                  </div>
-                </div>
-
-                {expandedId === ses.id && (
-                  <div style={{ marginBottom: 16, paddingLeft: 12 }}>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                      <button onClick={() => exportRecords('txt', `history-${ses.id}`, historyExportRecords())}>导出 TXT</button>
-                      <button onClick={() => exportRecords('srt', `history-${ses.id}`, historyExportRecords())}>导出 SRT</button>
-                      <button onClick={() => summarizeHistory(ses.id)}>AI 摘要</button>
-                    </div>
-                    {historySummary && (
-                      <p style={{ color: '#4ec9b0', background: '#111', padding: 12, borderRadius: 8 }}>{historySummary}</p>
-                    )}
-                    {historyRecords.length === 0 ? (
-                      <p style={{ color: '#888' }}>暂无记录</p>
-                    ) : (
-                      historyRecords.map(r => (
-                        <div key={r.id} style={{ borderBottom: '1px solid #333', padding: '8px 0' }}>
-                          <span style={{ color: '#ccc' }}>{r.source_text}</span>
-                          <span style={{ margin: '0 8px', color: '#666' }}>→</span>
-                          <span style={{ color: '#4ec9b0' }}>{r.translated_text}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
         </div>
-      )}
+
+        <nav className="primary-nav" aria-label="功能导航">
+          <button className={view === 'live' ? 'nav-item active' : 'nav-item'} onClick={() => handleViewChange('live')}>
+            <MessageSquareText size={18} />
+            <span>实时会话</span>
+          </button>
+          <button className={view === 'history' ? 'nav-item active' : 'nav-item'} onClick={() => handleViewChange('history')}>
+            <History size={18} />
+            <span>历史记录</span>
+          </button>
+        </nav>
+
+        <div className="sidebar-footer">
+          <span className={`status-dot ${statusTone}`} />
+          <div>
+            <strong>{running ? '正在翻译' : paused ? '会话已暂停' : '等待开始'}</strong>
+            <span>{status}</span>
+          </div>
+        </div>
+      </aside>
+
+      <main className="workspace">
+        {view === 'live' ? (
+          <section className="chat-page">
+            <header className="page-header">
+              <div>
+                <p className="eyebrow">实时会话</p>
+                <h1>{langName(sourceLang)} <span>→</span> {langName(targetLang)}</h1>
+              </div>
+              <div className="header-actions">
+                <button className="icon-command" title="导出 TXT" disabled={records.length === 0} onClick={() => exportRecords('txt', 'live-session', liveExportRecords())}>
+                  <FileText size={17} /><span>TXT</span>
+                </button>
+                <button className="icon-command" title="导出 SRT" disabled={records.length === 0} onClick={() => exportRecords('srt', 'live-session', liveExportRecords())}>
+                  <Download size={17} /><span>SRT</span>
+                </button>
+              </div>
+            </header>
+
+            <div className="message-stream" aria-live="polite">
+              {records.length === 0 && !showLiveDraft ? (
+                <div className="empty-chat">
+                  <div className="empty-icon"><MessageSquareText size={26} /></div>
+                  <h2>准备开始新的翻译</h2>
+                  <p>语音识别后的每一句原文和译文会在这里成对呈现。</p>
+                </div>
+              ) : null}
+
+              {records.map((record, index) => (
+                <article className="message-pair" key={record.id}>
+                  <div className="message-index">{String(index + 1).padStart(2, '0')}</div>
+                  <div className="message-content">
+                    <div className="message-line source-line">
+                      <span className="message-label">原文 · {langName(sourceLang)}</span>
+                      <p>{record.sourceText}</p>
+                    </div>
+                    <div className="message-line translated-line">
+                      <span className="message-label">译文 · {langName(targetLang)}</span>
+                      <p>{record.translatedText}</p>
+                    </div>
+                  </div>
+                </article>
+              ))}
+
+              {showLiveDraft ? (
+                <article className="message-pair live-draft">
+                  <div className="message-index"><span className="listening-pulse" /></div>
+                  <div className="message-content">
+                    <div className="message-line source-line">
+                      <span className="message-label">正在识别</span>
+                      <p>{sourceText}</p>
+                    </div>
+                    <div className="message-line translated-line">
+                      <span className="message-label">实时译文</span>
+                      <p>{translatedText || '翻译处理中...'}</p>
+                    </div>
+                  </div>
+                </article>
+              ) : null}
+              <div ref={chatEndRef} />
+            </div>
+
+            <footer className="control-dock">
+              <div className="settings-strip">
+                <label className="setting-control">
+                  <span>源语言</span>
+                  <select value={sourceLang} onChange={e => setSourceLang(e.target.value)} disabled={running}>
+                    {LANGUAGES.map(language => <option key={language.code} value={language.code}>{language.name}</option>)}
+                  </select>
+                </label>
+                <button className="swap-button" onClick={swapLanguages} disabled={running} title="交换语言">
+                  <ArrowRightLeft size={17} />
+                </button>
+                <label className="setting-control">
+                  <span>目标语言</span>
+                  <select value={targetLang} onChange={e => setTargetLang(e.target.value)} disabled={running}>
+                    {LANGUAGES.map(language => <option key={language.code} value={language.code}>{language.name}</option>)}
+                  </select>
+                </label>
+                <label className="setting-control audio-setting">
+                  <span>音频来源</span>
+                  <div className="select-with-icon">
+                    {selectedDevice === DEVICE_SYSTEM_AUDIO ? <Volume2 size={16} /> : <Mic size={16} />}
+                    <select value={selectedDevice} onChange={e => void handleDeviceChange(Number(e.target.value))} disabled={running}>
+                      {devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}
+                    </select>
+                  </div>
+                </label>
+                <button
+                  className={subtitleMounted ? 'subtitle-toggle enabled' : 'subtitle-toggle'}
+                  onClick={() => setSubtitleMounted(value => !value)}
+                  role="switch"
+                  aria-checked={subtitleMounted}
+                >
+                  <Captions size={18} />
+                  <span>悬浮字幕</span>
+                  <i />
+                </button>
+              </div>
+
+              <div className="session-controls">
+                <span className="dock-status">{status}</span>
+                {!running ? (
+                  <button className="primary-action" onClick={handleStart}>
+                    <Play size={18} fill="currentColor" />
+                    <span>{paused ? '继续翻译' : '开始翻译'}</span>
+                  </button>
+                ) : (
+                  <button className="secondary-action" onClick={handlePause}>
+                    <Pause size={18} fill="currentColor" />
+                    <span>暂停</span>
+                  </button>
+                )}
+                {(running || paused) ? (
+                  <button className="danger-action" onClick={handleStop} title="停止会话">
+                    <Square size={16} fill="currentColor" />
+                    <span>停止</span>
+                  </button>
+                ) : null}
+              </div>
+            </footer>
+          </section>
+        ) : (
+          <section className="history-page">
+            <header className="page-header history-header">
+              <div>
+                <p className="eyebrow">会话档案</p>
+                <h1>历史记录</h1>
+              </div>
+              <button className="danger-text-button" onClick={() => deleteHistory(selectedHistoryIds)} disabled={selectedHistoryIds.length === 0}>
+                <Trash2 size={17} /><span>删除选中</span>
+              </button>
+            </header>
+
+            <div className="history-toolbar">
+              <label className="search-field">
+                <Search size={17} />
+                <input value={historyKeyword} onChange={e => setHistoryKeyword(e.target.value)} placeholder="搜索原文或译文" />
+              </label>
+              <label className="date-field"><span>开始日期</span><input type="date" value={historyDateFrom} onChange={e => setHistoryDateFrom(e.target.value)} /></label>
+              <label className="date-field"><span>结束日期</span><input type="date" value={historyDateTo} onChange={e => setHistoryDateTo(e.target.value)} /></label>
+              <button className="search-button" onClick={loadHistoryList}><Search size={17} /><span>搜索</span></button>
+            </div>
+
+            <div className="history-list">
+              {historyLoading ? <div className="history-empty">正在加载历史记录...</div> : null}
+              {!historyLoading && historySessions.length === 0 ? <div className="history-empty">暂无历史记录</div> : null}
+              {!historyLoading && historySessions.map(session => (
+                <article className={expandedId === session.id ? 'history-item expanded' : 'history-item'} key={session.id}>
+                  <div className="history-row">
+                    <input
+                      aria-label="选择会话"
+                      type="checkbox"
+                      checked={selectedHistoryIds.includes(session.id)}
+                      onChange={event => toggleHistorySelection(session.id, event.target.checked)}
+                    />
+                    <button className="history-main" onClick={() => handleExpand(session.id)}>
+                      <strong>{langName(session.source_lang)} <span>→</span> {langName(session.target_lang)}</strong>
+                      <small>{formatTime(session.created_at)}</small>
+                    </button>
+                    <span className="record-count">{session.record_count} 条</span>
+                    <button className="icon-only danger" title="删除会话" onClick={() => deleteHistory([session.id])}><Trash2 size={17} /></button>
+                  </div>
+
+                  {expandedId === session.id ? (
+                    <div className="history-detail">
+                      <div className="detail-actions">
+                        <button onClick={() => exportRecords('txt', `history-${session.id}`, historyExportRecords())}><FileText size={16} /><span>导出 TXT</span></button>
+                        <button onClick={() => exportRecords('srt', `history-${session.id}`, historyExportRecords())}><Download size={16} /><span>导出 SRT</span></button>
+                        <button className="summary-button" onClick={() => summarizeHistory(session.id)}><Sparkles size={16} /><span>AI 摘要</span></button>
+                      </div>
+                      {historySummary ? <div className="summary-panel"><Sparkles size={17} /><p>{historySummary}</p></div> : null}
+                      <div className="history-messages">
+                        {historyRecords.length === 0 ? <p className="muted">暂无翻译记录</p> : null}
+                        {historyRecords.map((record, index) => (
+                          <div className="history-message" key={record.id}>
+                            <span>{String(index + 1).padStart(2, '0')}</span>
+                            <div><p>{record.source_text}</p><p>{record.translated_text}</p></div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+      </main>
     </div>
   );
 }

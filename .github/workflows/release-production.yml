@@ -117,10 +117,11 @@ jobs:
           cache: npm
           cache-dependency-path: TMK-Client/frontend/package-lock.json
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.110
-      - name: Install frontend dependencies
-        working-directory: TMK-Client/frontend
-        run: npm ci
+        working-directory: TMK-Client
+        shell: pwsh
+        run: |
+          $wailsVersion = go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3
+          go install "github.com/wailsapp/wails/v3/cmd/wails3@$wailsVersion"
       - name: Build production client
         shell: pwsh
         run: ./scripts/build-client-production.ps1 -Version '${{ inputs.version }}'

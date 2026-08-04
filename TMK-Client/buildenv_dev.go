@@ -2,4 +2,7 @@
 
 package main
 
-const defaultRuntimeEnvironment = envTest
+const (
+	defaultRuntimeEnvironment = envTest
+	productionBuild           = false
+)

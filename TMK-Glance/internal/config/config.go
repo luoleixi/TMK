@@ -65,6 +65,9 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("DB_PATH"); v != "" {
 		cfg.Storage.DBPath = v
 	}
+	if v := os.Getenv("SERVER_PORT"); v != "" {
+		cfg.Server.Port = v
+	}
 	if cfg.Translator.Bailian.APIKey == "" {
 		cfg.Translator.Bailian.APIKey = cfg.ASR.Bailian.APIKey
 	}

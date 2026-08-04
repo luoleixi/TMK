@@ -1,0 +1,108 @@
+name: CI and Test Deployment
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-environment
+  cancel-in-progress: false
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: TMK-Glance
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: TMK-Glance/go.mod
+          cache-dependency-path: TMK-Glance/go.sum
+      - run: go test -race ./...
+
+  client-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: TMK-Client/go.mod
+          cache-dependency-path: TMK-Client/go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: TMK-Client/frontend/package-lock.json
+      - name: Test client Go code
+        working-directory: TMK-Client
+        run: go test ./...
+      - name: Test production environment lock
+        working-directory: TMK-Client
+        run: go test -tags production ./...
+      - name: Build frontend
+        working-directory: TMK-Client/frontend
+        run: npm ci && npm run build
+
+  build-server:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: backend-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: TMK-Glance/go.mod
+          cache-dependency-path: TMK-Glance/go.sum
+      - name: Build Linux server
+        working-directory: TMK-Glance
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags='-s -w' -o ../dist/tmk-glance .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tmk-glance-linux
+          path: dist/tmk-glance
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy-test:
+    needs: [backend-test, client-test, build-server]
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v5
+        with:
+          name: tmk-glance-linux
+          path: dist
+      - name: Configure deployment identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
+        run: |
+          test -n "$SSH_PRIVATE_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          install -m 600 deploy/ssh_known_hosts ~/.ssh/known_hosts
+      - name: Deploy test environment
+        env:
+          HOST: 117.72.159.185
+          USER: tmk-deploy-test
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          chmod 755 dist/tmk-glance
+          checksum=$(sha256sum dist/tmk-glance | awk '{print $1}')
+          remote_artifact="/var/lib/tmk-deploy/test/tmk-glance-${RELEASE_ID}"
+          scp dist/tmk-glance "${USER}@${HOST}:${remote_artifact}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-test "${remote_artifact}" "${checksum}" "${RELEASE_ID}"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/api/health"

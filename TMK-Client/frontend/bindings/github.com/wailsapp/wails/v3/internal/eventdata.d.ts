@@ -13,6 +13,7 @@ declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "shortcut": string;
+            "stream-reset": boolean;
             "time": string;
             "transcript": main$0.TranscriptMsg;
             "translation": main$0.TranslationMsg;

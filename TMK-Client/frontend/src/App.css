@@ -841,6 +841,17 @@ html.subtitle-window body #root {
   background: transparent;
 }
 
+.subtitle-previous {
+  margin-bottom: 8px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 15px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.98);
+  white-space: nowrap;
+}
+
 .subtitle-translation,
 .subtitle-source {
   overflow-wrap: anywhere;
@@ -853,16 +864,25 @@ html.subtitle-window body #root {
 }
 
 .subtitle-translation {
+  display: -webkit-box;
+  min-height: 32px;
+  overflow: hidden;
   font-size: 24px;
   line-height: 1.35;
   font-weight: 700;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .subtitle-source {
   margin-top: 8px;
+  display: -webkit-box;
+  overflow: hidden;
   color: rgba(255, 255, 255, 0.82);
   font-size: 16px;
   line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 @media (max-width: 860px) {

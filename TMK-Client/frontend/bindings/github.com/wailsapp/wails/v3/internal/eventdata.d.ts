@@ -7,7 +7,7 @@ import type { Events } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import type * as main$0 from "../../../../../changeme/models.js";
+import type * as session$0 from "../../../../../changeme/internal/client/session/models.js";
 
 declare module "@wailsio/runtime" {
     namespace Events {
@@ -15,8 +15,8 @@ declare module "@wailsio/runtime" {
             "shortcut": string;
             "stream-reset": boolean;
             "time": string;
-            "transcript": main$0.TranscriptMsg;
-            "translation": main$0.TranslationMsg;
+            "transcript": session$0.TranscriptMsg;
+            "translation": session$0.TranslationMsg;
         }
     }
 }

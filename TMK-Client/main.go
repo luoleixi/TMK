@@ -6,6 +6,14 @@ import (
 	"log"
 	"time"
 
+	"changeme/internal/client/capture"
+	clientexport "changeme/internal/client/export"
+	"changeme/internal/client/session"
+	"changeme/internal/client/settings"
+	"changeme/internal/client/window"
+	"changeme/internal/platform/hotkey"
+	"changeme/internal/platform/shortcut"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -23,8 +31,8 @@ var trayIcon []byte
 
 func init() {
 	application.RegisterEvent[string]("time")
-	application.RegisterEvent[TranscriptMsg]("transcript")
-	application.RegisterEvent[TranslationMsg]("translation")
+	application.RegisterEvent[session.TranscriptMsg]("transcript")
+	application.RegisterEvent[session.TranslationMsg]("translation")
 	application.RegisterEvent[bool]("stream-reset")
 	application.RegisterEvent[string]("shortcut")
 }
@@ -39,11 +47,16 @@ func main() {
 	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
 	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
 	// 'Mac' options tailor the application when running an macOS.
-	sessionSvc = &SessionService{}
-	captureSvc = NewCaptureService()
-	settingsSvc := NewSettingsService()
-	exportSvc := NewExportService()
-	windowSvc := NewWindowService()
+	sessionSvc := session.NewService()
+	captureSvc := capture.NewService(sessionSvc.SendAudio)
+	settingsSvc := settings.NewService()
+	exportSvc := clientexport.NewService()
+	var mainWindow application.Window
+	var subtitleWindow application.Window
+	windowSvc := window.NewService(
+		func() application.Window { return mainWindow },
+		func() application.Window { return subtitleWindow },
+	)
 
 	var app *application.App
 	app = application.New(application.Options{
@@ -60,9 +73,9 @@ func main() {
 			Handler: application.AssetFileServerFS(assets),
 		},
 		KeyBindings: map[string]func(window application.Window){
-			"CmdOrCtrl+Shift+S": func(window application.Window) { emitShortcut(app, shortcutStart) },
-			"CmdOrCtrl+Shift+P": func(window application.Window) { emitShortcut(app, shortcutPause) },
-			"CmdOrCtrl+Shift+X": func(window application.Window) { emitShortcut(app, shortcutStop) },
+			"CmdOrCtrl+Shift+S": func(window application.Window) { shortcut.Emit(app, shortcut.Start) },
+			"CmdOrCtrl+Shift+P": func(window application.Window) { shortcut.Emit(app, shortcut.Pause) },
+			"CmdOrCtrl+Shift+X": func(window application.Window) { shortcut.Emit(app, shortcut.Stop) },
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
@@ -70,10 +83,10 @@ func main() {
 		Windows: application.WindowsOptions{
 			DisableQuitOnLastWindowClosed: true,
 			WndProcInterceptor: func(hwnd uintptr, msg uint32, wParam, lParam uintptr) (uintptr, bool) {
-				registerGlobalHotkeys(hwnd)
-				if isHotkeyMessage(msg) {
-					if action, ok := handleGlobalHotkey(wParam); ok {
-						emitShortcut(app, action)
+				hotkey.Register(hwnd)
+				if hotkey.IsMessage(msg) {
+					if action, ok := hotkey.Handle(wParam); ok {
+						shortcut.Emit(app, action)
 						return 0, true
 					}
 				}
@@ -84,7 +97,7 @@ func main() {
 			DisableQuitOnLastWindowClosed: true,
 		},
 	})
-	defer unregisterGlobalHotkeys()
+	defer hotkey.Unregister()
 
 	// Create a new window with the necessary options.
 	// 'Title' is the title of the window.
@@ -123,9 +136,9 @@ func main() {
 	})
 	subtitleWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		e.Cancel()
-		setSubtitleVisible(false)
+		windowSvc.SetSubtitleVisible(false)
 	})
-	setupSystemTray(app)
+	setupSystemTray(app, mainWindow, windowSvc)
 
 	// Create a goroutine that emits an event containing the current time every second.
 	// The frontend can listen to this event and update the UI accordingly.

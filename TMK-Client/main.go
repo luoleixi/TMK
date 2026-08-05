@@ -120,6 +120,10 @@ func main() {
 			HiddenOnTaskbar: true,
 		},
 	})
+	subtitleWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		e.Cancel()
+		setSubtitleVisible(false)
+	})
 	setupSystemTray(app)
 
 	// Create a goroutine that emits an event containing the current time every second.

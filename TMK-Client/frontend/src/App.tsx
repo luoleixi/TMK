@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { SessionService, CaptureService, SettingsService, ExportService, WindowService } from '../bindings/changeme';
 import { Events } from '@wailsio/runtime';
 import {
@@ -17,6 +17,7 @@ import {
   Square,
   Trash2,
   Volume2,
+  X,
 } from 'lucide-react';
 import './App.css';
 
@@ -77,9 +78,7 @@ function SubtitleWindow() {
   const [sourceText, setSourceText] = useState('');
   const [translatedText, setTranslatedText] = useState('');
 
-  useLayoutEffect(() => {
-    document.documentElement.classList.add('subtitle-window');
-    document.body.classList.add('subtitle-window');
+  useEffect(() => {
     const offTranscript = Events.On('transcript', (event: any) => {
       setSourceText(event.data.text);
     });
@@ -87,8 +86,6 @@ function SubtitleWindow() {
       setTranslatedText(event.data.text);
     });
     return () => {
-      document.documentElement.classList.remove('subtitle-window');
-      document.body.classList.remove('subtitle-window');
       offTranscript();
       offTranslation();
     };
@@ -96,6 +93,15 @@ function SubtitleWindow() {
 
   return (
     <div className="subtitle-surface">
+      <button
+        type="button"
+        className="subtitle-close"
+        title="关闭悬挂字幕"
+        aria-label="关闭悬挂字幕"
+        onClick={() => void WindowService.HideSubtitle()}
+      >
+        <X size={17} />
+      </button>
       <div className="subtitle-content" aria-live="polite">
         <div className="subtitle-translation">
           {translatedText || '等待翻译...'}
@@ -156,6 +162,9 @@ function MainApp() {
         }]);
       }
     });
+    const offSubtitleVisibility = Events.On('subtitle-visibility-changed', (event: any) => {
+      setSubtitleMounted(Boolean(event.data));
+    });
 
     Promise.all([
       CaptureService.ListCaptureDevices(),
@@ -182,6 +191,7 @@ function MainApp() {
     return () => {
       offTranscript();
       offTranslation();
+      offSubtitleVisibility();
     };
   }, []);
 

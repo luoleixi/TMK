@@ -26,15 +26,11 @@ func (s *WindowService) HideMain() {
 }
 
 func (s *WindowService) ShowSubtitle() {
-	if subtitleWindow != nil {
-		subtitleWindow.SetAlwaysOnTop(true).Show()
-	}
+	setSubtitleVisible(true)
 }
 
 func (s *WindowService) HideSubtitle() {
-	if subtitleWindow != nil {
-		subtitleWindow.Hide()
-	}
+	setSubtitleVisible(false)
 }
 
 func (s *WindowService) ToggleSubtitle() bool {
@@ -42,9 +38,20 @@ func (s *WindowService) ToggleSubtitle() bool {
 		return false
 	}
 	if subtitleWindow.IsVisible() {
-		subtitleWindow.Hide()
+		return setSubtitleVisible(false)
+	}
+	return setSubtitleVisible(true)
+}
+
+func setSubtitleVisible(visible bool) bool {
+	if subtitleWindow == nil {
 		return false
 	}
-	subtitleWindow.SetAlwaysOnTop(true).Show()
-	return true
+	if visible {
+		subtitleWindow.SetAlwaysOnTop(true).Show()
+	} else {
+		subtitleWindow.Hide()
+	}
+	application.Get().Event.Emit("subtitle-visibility-changed", visible)
+	return visible
 }

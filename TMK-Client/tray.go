@@ -28,14 +28,10 @@ func setupSystemTray(app *application.App) {
 	})
 	menu.AddSeparator()
 	menu.Add("显示悬挂字幕").OnClick(func(ctx *application.Context) {
-		if subtitleWindow != nil {
-			subtitleWindow.SetAlwaysOnTop(true).Show()
-		}
+		setSubtitleVisible(true)
 	})
 	menu.Add("隐藏悬挂字幕").OnClick(func(ctx *application.Context) {
-		if subtitleWindow != nil {
-			subtitleWindow.Hide()
-		}
+		setSubtitleVisible(false)
 	})
 	menu.AddSeparator()
 	menu.Add("开始翻译").OnClick(func(ctx *application.Context) {

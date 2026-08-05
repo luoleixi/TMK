@@ -18,16 +18,27 @@ const bailianWSURL = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 type bailianASR struct {
 	apiKey   string
 	language string
+	options  BailianOptions
 	conn     *websocket.Conn
 	mu       sync.RWMutex
 	writeMu  sync.Mutex
 }
 
-func NewBailian(apiKey, language string) ASR {
+type BailianOptions struct {
+	MaxSentenceSilenceMS         int
+	SemanticPunctuationEnabled   bool
+	MultiThresholdModeEnabled    bool
+	PunctuationPredictionEnabled bool
+}
+
+func NewBailian(apiKey, language string, options BailianOptions) ASR {
 	if language == "" {
 		language = "zh"
 	}
-	return &bailianASR{apiKey: apiKey, language: language}
+	if options.MaxSentenceSilenceMS < 200 || options.MaxSentenceSilenceMS > 6000 {
+		options.MaxSentenceSilenceMS = 600
+	}
+	return &bailianASR{apiKey: apiKey, language: language, options: options}
 }
 
 func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-chan Result, error) {
@@ -133,8 +144,16 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 				isFinal := event.Payload.Output.Sentence.SentenceEnd
 				if text != "" {
 					log.Printf("[asr:bailian] result: %q (final=%v)", text, isFinal)
+					result := Result{
+						Text:        text,
+						IsFinal:     isFinal,
+						BeginTimeMS: event.Payload.Output.Sentence.BeginTime,
+					}
+					if event.Payload.Output.Sentence.EndTime != nil {
+						result.EndTimeMS = *event.Payload.Output.Sentence.EndTime
+					}
 					select {
-					case out <- Result{Text: text, IsFinal: isFinal}:
+					case out <- result:
 					case <-ctx.Done():
 						return
 					}
@@ -167,9 +186,13 @@ func (b *bailianASR) sendRunTask(taskID string) error {
 			"function":   "recognition",
 			"model":      "paraformer-realtime-v2",
 			"parameters": map[string]any{
-				"language":    b.language,
-				"sample_rate": 16000,
-				"format":      "pcm",
+				"language":                       b.language,
+				"sample_rate":                    16000,
+				"format":                         "pcm",
+				"semantic_punctuation_enabled":   b.options.SemanticPunctuationEnabled,
+				"max_sentence_silence":           b.options.MaxSentenceSilenceMS,
+				"multi_threshold_mode_enabled":   b.options.MultiThresholdModeEnabled,
+				"punctuation_prediction_enabled": b.options.PunctuationPredictionEnabled,
 			},
 			"input": map[string]any{},
 		},

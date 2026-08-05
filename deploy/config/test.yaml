@@ -10,6 +10,14 @@ asr:
   provider: bailian
   bailian:
     api_key: ""
+    max_sentence_silence_ms: 600
+    semantic_punctuation_enabled: false
+    multi_threshold_mode_enabled: true
+    punctuation_prediction_enabled: true
+  segmenter:
+    max_runes: 40
+    max_duration_ms: 5000
+    soft_commit_delay_ms: 300
 
 translator:
   provider: bailian

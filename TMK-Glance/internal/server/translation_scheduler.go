@@ -20,9 +20,13 @@ const (
 )
 
 type translationJob struct {
-	Seq     int64
-	Text    string
-	IsFinal bool
+	Seq       int64
+	SegmentID int64
+	Revision  int64
+	Text      string
+	IsFinal   bool
+	Reason    string
+	barrier   chan struct{}
 }
 
 type translationScheduler struct {
@@ -74,6 +78,14 @@ func (s *translationScheduler) stop() {
 }
 
 func (s *translationScheduler) submit(job translationJob) {
+	if job.barrier != nil {
+		select {
+		case s.finalCh <- job:
+		case <-s.ctx.Done():
+			close(job.barrier)
+		}
+		return
+	}
 	if job.Text == "" {
 		return
 	}
@@ -102,6 +114,17 @@ func (s *translationScheduler) submit(job translationJob) {
 	}
 }
 
+func (s *translationScheduler) drainFinals(timeout time.Duration) bool {
+	barrier := make(chan struct{})
+	s.submit(translationJob{IsFinal: true, barrier: barrier})
+	select {
+	case <-barrier:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 func (s *translationScheduler) run() {
 	defer close(s.done)
 
@@ -114,6 +137,10 @@ func (s *translationScheduler) run() {
 		case finalJob := <-s.finalCh:
 			pendingPartial = nil
 			s.drainPartials()
+			if finalJob.barrier != nil {
+				close(finalJob.barrier)
+				continue
+			}
 			s.translate(finalJob)
 			continue
 		default:
@@ -125,6 +152,10 @@ func (s *translationScheduler) run() {
 		case finalJob := <-s.finalCh:
 			pendingPartial = nil
 			s.drainPartials()
+			if finalJob.barrier != nil {
+				close(finalJob.barrier)
+				continue
+			}
 			s.translate(finalJob)
 		case partialJob := <-s.partialCh:
 			pendingPartial = &partialJob
@@ -172,11 +203,14 @@ func (s *translationScheduler) translate(job translationJob) {
 	}
 
 	payload := gin.H{
-		"type":      "translation",
-		"seq":       job.Seq,
-		"text":      translated,
-		"is_final":  job.IsFinal,
-		"timestamp": time.Now().UnixMilli(),
+		"type":       "translation",
+		"seq":        job.Seq,
+		"segment_id": job.SegmentID,
+		"revision":   job.Revision,
+		"text":       translated,
+		"is_final":   job.IsFinal,
+		"reason":     job.Reason,
+		"timestamp":  time.Now().UnixMilli(),
 	}
 	if err != nil {
 		payload["warning"] = "translate_failed_fallback_to_source"

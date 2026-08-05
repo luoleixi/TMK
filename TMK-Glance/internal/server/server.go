@@ -15,6 +15,7 @@ import (
 	"tmk-glance/internal/health"
 	"tmk-glance/internal/language"
 	"tmk-glance/internal/model"
+	"tmk-glance/internal/segmenter"
 	"tmk-glance/internal/store"
 	"tmk-glance/internal/translator"
 
@@ -461,7 +462,11 @@ func handleInterpret(c *gin.Context) {
 	}
 	log.Printf("[ws] client connected, session: %s", sessionID)
 
-	actor := newSessionActor(conn, sessionID, sessionStore, translateSvc)
+	actor := newSessionActor(conn, sessionID, sessionStore, translateSvc, segmenter.Config{
+		MaxRunes:        asrCfg.ASR.Segmenter.MaxRunes,
+		MaxDuration:     time.Duration(asrCfg.ASR.Segmenter.MaxDurationMS) * time.Millisecond,
+		SoftCommitDelay: time.Duration(asrCfg.ASR.Segmenter.SoftCommitDelayMS) * time.Millisecond,
+	})
 	actor.run()
 }
 

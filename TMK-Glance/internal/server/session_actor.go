@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"tmk-glance/internal/asr"
+	"tmk-glance/internal/segmenter"
 	"tmk-glance/internal/store"
 	"tmk-glance/internal/translator"
 
@@ -29,29 +31,32 @@ type sessionActor struct {
 	store         *store.SessionStore
 	translatorSvc translator.Translator
 
-	asrEngine asr.ASR
-	asrCtx    context.Context
-	asrCancel context.CancelFunc
-	scheduler *translationScheduler
-	audioCh   chan []byte
+	asrEngine       asr.ASR
+	asrCtx          context.Context
+	asrCancel       context.CancelFunc
+	scheduler       *translationScheduler
+	audioCh         chan []byte
+	segmenterConfig segmenter.Config
+	pipelineDone    chan struct{}
 
 	sendCh           chan any
 	done             chan struct{}
-	audioCount       int
-	droppedAudioCnt  int
-	droppedSendCount int
+	audioCount       atomic.Int64
+	droppedAudioCnt  atomic.Int64
+	droppedSendCount atomic.Int64
 	seq              int64
 }
 
-func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store.SessionStore, translatorSvc translator.Translator) *sessionActor {
+func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store.SessionStore, translatorSvc translator.Translator, segmenterConfig segmenter.Config) *sessionActor {
 	return &sessionActor{
-		conn:          conn,
-		sessionID:     sessionID,
-		store:         sessionStore,
-		translatorSvc: translatorSvc,
-		asrCancel:     func() {},
-		sendCh:        make(chan any, sendQueueSize),
-		done:          make(chan struct{}),
+		conn:            conn,
+		sessionID:       sessionID,
+		store:           sessionStore,
+		translatorSvc:   translatorSvc,
+		segmenterConfig: segmenterConfig,
+		asrCancel:       func() {},
+		sendCh:          make(chan any, sendQueueSize),
+		done:            make(chan struct{}),
 	}
 }
 
@@ -101,16 +106,7 @@ func (a *sessionActor) readPump() {
 }
 
 func (a *sessionActor) cleanup() {
-	a.asrCancel()
-	if a.scheduler != nil {
-		a.scheduler.stop()
-		a.scheduler = nil
-	}
-	if a.asrEngine != nil {
-		if err := a.asrEngine.Close(); err != nil {
-			log.Printf("[asr] close failed, session=%s err=%v", a.sessionID, err)
-		}
-	}
+	a.stopPipeline()
 	if ended, err := a.store.End(a.sessionID); err != nil {
 		log.Printf("[db] end session failed: %v", err)
 	} else if ended {
@@ -124,14 +120,14 @@ func (a *sessionActor) handleAudio(msg []byte) {
 	}
 	select {
 	case a.audioCh <- msg:
-		a.audioCount++
-		if a.audioCount%50 == 1 {
-			log.Printf("[ws] received %d audio chunks, session=%s", a.audioCount, a.sessionID)
+		count := a.audioCount.Add(1)
+		if count%50 == 1 {
+			log.Printf("[ws] received %d audio chunks, session=%s", count, a.sessionID)
 		}
 	default:
-		a.droppedAudioCnt++
-		if a.droppedAudioCnt%50 == 1 {
-			log.Printf("[ws] drop audio chunk, session=%s dropped=%d", a.sessionID, a.droppedAudioCnt)
+		count := a.droppedAudioCnt.Add(1)
+		if count%50 == 1 {
+			log.Printf("[ws] drop audio chunk, session=%s dropped=%d", a.sessionID, count)
 		}
 	}
 }
@@ -148,11 +144,7 @@ func (a *sessionActor) handleControl(msgType string) bool {
 	case "ping":
 		a.writeJSON(gin.H{"type": "pong", "timestamp_ms": time.Now().UnixMilli()})
 	case "stop":
-		a.asrCancel()
-		if a.scheduler != nil {
-			a.scheduler.stop()
-			a.scheduler = nil
-		}
+		a.stopPipeline()
 		a.writeJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
 		return false
 	default:
@@ -193,28 +185,95 @@ func (a *sessionActor) startInterpret() {
 		return
 	}
 
-	a.scheduler = newTranslationScheduler(a.asrCtx, a.sessionID, ses.SourceLang, ses.TargetLang, a.translatorSvc, a.store, a.writeJSON)
+	a.scheduler = newTranslationScheduler(context.Background(), a.sessionID, ses.SourceLang, ses.TargetLang, a.translatorSvc, a.store, a.writeJSON)
 	a.scheduler.start()
+	a.pipelineDone = make(chan struct{})
 
 	a.writeJSON(gin.H{"type": "started", "timestamp_ms": time.Now().UnixMilli()})
 
 	scheduler := a.scheduler
-	go a.consumeASRResults(resultCh, scheduler)
+	done := a.pipelineDone
+	go a.consumeASRResults(resultCh, scheduler, done)
 }
 
-func (a *sessionActor) consumeASRResults(resultCh <-chan asr.Result, scheduler *translationScheduler) {
-	for r := range resultCh {
+func (a *sessionActor) consumeASRResults(resultCh <-chan asr.Result, scheduler *translationScheduler, done chan<- struct{}) {
+	defer close(done)
+	stream := segmenter.New(a.segmenterConfig)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case result, ok := <-resultCh:
+			now := time.Now()
+			if !ok {
+				a.publishSegments(stream.Flush(now), scheduler)
+				return
+			}
+			a.publishSegments(stream.Push(segmenter.Input{
+				Text:        result.Text,
+				IsFinal:     result.IsFinal,
+				BeginTimeMS: result.BeginTimeMS,
+				EndTimeMS:   result.EndTimeMS,
+			}, now), scheduler)
+		case now := <-ticker.C:
+			a.publishSegments(stream.Tick(now), scheduler)
+		case <-a.asrCtx.Done():
+			a.publishSegments(stream.Flush(time.Now()), scheduler)
+			return
+		}
+	}
+}
+
+func (a *sessionActor) publishSegments(segments []segmenter.Segment, scheduler *translationScheduler) {
+	for _, result := range segments {
 		a.seq++
 		seq := a.seq
 		a.writeJSON(gin.H{
-			"type":      "transcript",
-			"seq":       seq,
-			"text":      r.Text,
-			"is_final":  r.IsFinal,
-			"timestamp": time.Now().UnixMilli(),
+			"type":       "transcript",
+			"seq":        seq,
+			"segment_id": result.ID,
+			"revision":   result.Revision,
+			"text":       result.Text,
+			"is_final":   result.IsFinal,
+			"reason":     result.Reason,
+			"timestamp":  time.Now().UnixMilli(),
 		})
-		scheduler.submit(translationJob{Seq: seq, Text: r.Text, IsFinal: r.IsFinal})
+		scheduler.submit(translationJob{
+			Seq: seq, SegmentID: result.ID, Revision: result.Revision,
+			Text: result.Text, IsFinal: result.IsFinal, Reason: result.Reason,
+		})
 	}
+}
+
+func (a *sessionActor) stopPipeline() {
+	if a.asrEngine == nil && a.scheduler == nil {
+		return
+	}
+
+	a.asrCancel()
+	if a.asrEngine != nil {
+		if err := a.asrEngine.Close(); err != nil {
+			log.Printf("[asr] close failed, session=%s err=%v", a.sessionID, err)
+		}
+		a.asrEngine = nil
+	}
+	if a.pipelineDone != nil {
+		select {
+		case <-a.pipelineDone:
+		case <-time.After(time.Second):
+			log.Printf("[segmenter] flush timeout, session=%s", a.sessionID)
+		}
+		a.pipelineDone = nil
+	}
+	if a.scheduler != nil {
+		if !a.scheduler.drainFinals(15 * time.Second) {
+			log.Printf("[translate] final drain timeout, session=%s", a.sessionID)
+		}
+		a.scheduler.stop()
+		a.scheduler = nil
+	}
+	a.audioCh = nil
 }
 
 func (a *sessionActor) writeJSON(v any) {
@@ -222,9 +281,9 @@ func (a *sessionActor) writeJSON(v any) {
 	case a.sendCh <- v:
 	case <-a.done:
 	default:
-		a.droppedSendCount++
-		if a.droppedSendCount%50 == 1 {
-			log.Printf("[ws] drop outbound message, session=%s dropped=%d", a.sessionID, a.droppedSendCount)
+		count := a.droppedSendCount.Add(1)
+		if count%50 == 1 {
+			log.Printf("[ws] drop outbound message, session=%s dropped=%d", a.sessionID, count)
 		}
 	}
 }

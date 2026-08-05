@@ -177,17 +177,33 @@ export class HistorySession {
 }
 
 export class TranscriptMsg {
+    "seq": number;
+    "segment_id": number;
+    "revision": number;
     "text": string;
     "is_final": boolean;
+    "reason": string;
     "timestamp": number;
 
     /** Creates a new TranscriptMsg instance. */
     constructor($$source: Partial<TranscriptMsg> = {}) {
+        if (!("seq" in $$source)) {
+            this["seq"] = 0;
+        }
+        if (!("segment_id" in $$source)) {
+            this["segment_id"] = 0;
+        }
+        if (!("revision" in $$source)) {
+            this["revision"] = 0;
+        }
         if (!("text" in $$source)) {
             this["text"] = "";
         }
         if (!("is_final" in $$source)) {
             this["is_final"] = false;
+        }
+        if (!("reason" in $$source)) {
+            this["reason"] = "";
         }
         if (!("timestamp" in $$source)) {
             this["timestamp"] = 0;
@@ -206,17 +222,33 @@ export class TranscriptMsg {
 }
 
 export class TranslationMsg {
+    "seq": number;
+    "segment_id": number;
+    "revision": number;
     "text": string;
     "is_final": boolean;
+    "reason": string;
     "timestamp": number;
 
     /** Creates a new TranslationMsg instance. */
     constructor($$source: Partial<TranslationMsg> = {}) {
+        if (!("seq" in $$source)) {
+            this["seq"] = 0;
+        }
+        if (!("segment_id" in $$source)) {
+            this["segment_id"] = 0;
+        }
+        if (!("revision" in $$source)) {
+            this["revision"] = 0;
+        }
         if (!("text" in $$source)) {
             this["text"] = "";
         }
         if (!("is_final" in $$source)) {
             this["is_final"] = false;
+        }
+        if (!("reason" in $$source)) {
+            this["reason"] = "";
         }
         if (!("timestamp" in $$source)) {
             this["timestamp"] = 0;

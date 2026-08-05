@@ -25,14 +25,22 @@ type SessionService struct {
 }
 
 type TranscriptMsg struct {
+	Seq       int64  `json:"seq"`
+	SegmentID int64  `json:"segment_id"`
+	Revision  int64  `json:"revision"`
 	Text      string `json:"text"`
 	IsFinal   bool   `json:"is_final"`
+	Reason    string `json:"reason"`
 	Timestamp int64  `json:"timestamp"`
 }
 
 type TranslationMsg struct {
+	Seq       int64  `json:"seq"`
+	SegmentID int64  `json:"segment_id"`
+	Revision  int64  `json:"revision"`
 	Text      string `json:"text"`
 	IsFinal   bool   `json:"is_final"`
+	Reason    string `json:"reason"`
 	Timestamp int64  `json:"timestamp"`
 }
 
@@ -147,6 +155,9 @@ func (s *SessionService) StartInterpret() error {
 			json.Unmarshal(msg, &base)
 
 			switch base.Type {
+			case "started":
+				application.Get().Event.Emit("stream-reset", true)
+
 			case "transcript":
 				var t TranscriptMsg
 				json.Unmarshal(msg, &t)

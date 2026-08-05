@@ -25,6 +25,7 @@ func init() {
 	application.RegisterEvent[string]("time")
 	application.RegisterEvent[TranscriptMsg]("transcript")
 	application.RegisterEvent[TranslationMsg]("translation")
+	application.RegisterEvent[bool]("stream-reset")
 	application.RegisterEvent[string]("shortcut")
 }
 

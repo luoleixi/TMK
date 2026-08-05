@@ -72,24 +72,78 @@ type ExportRecord = {
   sequence: number;
 };
 
+type StreamMessage = {
+  seq?: number;
+  segment_id?: number;
+  revision?: number;
+  text: string;
+  is_final?: boolean;
+  reason?: string;
+  timestamp?: number;
+};
+
+type SubtitleSegment = {
+  id: number;
+  source: string;
+  translation: string;
+  sourceRevision: number;
+  translationRevision: number;
+  isFinal: boolean;
+};
+
 const DEVICE_SYSTEM_AUDIO = -2;
 
+const streamSegmentID = (message: StreamMessage) =>
+  Number(message.segment_id || message.seq || message.timestamp || Date.now());
+
+const updateSubtitleSegments = (
+  segments: SubtitleSegment[],
+  message: StreamMessage,
+  field: 'source' | 'translation',
+) => {
+  const id = streamSegmentID(message);
+  const revision = Number(message.revision || message.seq || 0);
+  const revisionField = field === 'source' ? 'sourceRevision' : 'translationRevision';
+  const existing = segments.find(segment => segment.id === id);
+  if (existing && revision < existing[revisionField]) return segments;
+
+  const updated: SubtitleSegment = {
+    id,
+    source: existing?.source || '',
+    translation: existing?.translation || '',
+    sourceRevision: existing?.sourceRevision || 0,
+    translationRevision: existing?.translationRevision || 0,
+    isFinal: Boolean(existing?.isFinal || message.is_final),
+    [field]: message.text,
+    [revisionField]: revision,
+  };
+  return [...segments.filter(segment => segment.id !== id), updated]
+    .sort((left, right) => left.id - right.id)
+    .slice(-2);
+};
+
 function SubtitleWindow() {
-  const [sourceText, setSourceText] = useState('');
-  const [translatedText, setTranslatedText] = useState('');
+  const [segments, setSegments] = useState<SubtitleSegment[]>([]);
 
   useEffect(() => {
     const offTranscript = Events.On('transcript', (event: any) => {
-      setSourceText(event.data.text);
+      setSegments(previous => updateSubtitleSegments(previous, event.data, 'source'));
     });
     const offTranslation = Events.On('translation', (event: any) => {
-      setTranslatedText(event.data.text);
+      setSegments(previous => updateSubtitleSegments(previous, event.data, 'translation'));
+    });
+    const offReset = Events.On('stream-reset', () => {
+      setSegments([]);
     });
     return () => {
       offTranscript();
       offTranslation();
+      offReset();
     };
   }, []);
+
+  const previous = segments.length > 1 ? segments[0] : undefined;
+  const current = segments[segments.length - 1];
 
   return (
     <div className="subtitle-surface">
@@ -103,11 +157,16 @@ function SubtitleWindow() {
         <X size={17} />
       </button>
       <div className="subtitle-content" aria-live="polite">
+        {previous && (
+          <div className="subtitle-previous">
+            {previous.translation || previous.source}
+          </div>
+        )}
         <div className="subtitle-translation">
-          {translatedText || '等待翻译...'}
+          {current?.translation || '等待翻译...'}
         </div>
         <div className="subtitle-source">
-          {sourceText || '等待语音输入...'}
+          {current?.source || '等待语音输入...'}
         </div>
       </div>
     </div>
@@ -128,8 +187,9 @@ function MainApp() {
   const [subtitleMounted, setSubtitleMounted] = useState(true);
   const transitioning = useRef(false);
   const sessionIdRef = useRef('');
-  const sourceTextRef = useRef('');
-  const lastSourceRef = useRef('');
+  const sourceBySegmentRef = useRef(new Map<number, string>());
+  const committedSegmentsRef = useRef(new Set<number>());
+  const currentSegmentIDRef = useRef(0);
   const settingsReady = useRef(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -148,17 +208,28 @@ function MainApp() {
 
   useEffect(() => {
     const offTranscript = Events.On('transcript', (event: any) => {
-      sourceTextRef.current = event.data.text;
-      setSourceText(event.data.text);
+      const message = event.data as StreamMessage;
+      const segmentID = streamSegmentID(message);
+      if (segmentID !== currentSegmentIDRef.current) {
+        setTranslatedText('');
+      }
+      currentSegmentIDRef.current = segmentID;
+      sourceBySegmentRef.current.set(segmentID, message.text);
+      setSourceText(message.text);
     });
     const offTranslation = Events.On('translation', (event: any) => {
-      setTranslatedText(event.data.text);
-      if (event.data.is_final && sourceTextRef.current && sourceTextRef.current !== lastSourceRef.current) {
-        lastSourceRef.current = sourceTextRef.current;
+      const message = event.data as StreamMessage;
+      const segmentID = streamSegmentID(message);
+      if (segmentID === currentSegmentIDRef.current) {
+        setTranslatedText(message.text);
+      }
+      const segmentSource = sourceBySegmentRef.current.get(segmentID);
+      if (message.is_final && segmentSource && !committedSegmentsRef.current.has(segmentID)) {
+        committedSegmentsRef.current.add(segmentID);
         setRecords(prev => [...prev, {
-          id: Date.now(),
-          sourceText: sourceTextRef.current,
-          translatedText: event.data.text,
+          id: segmentID,
+          sourceText: segmentSource,
+          translatedText: message.text,
         }]);
       }
     });
@@ -221,7 +292,9 @@ function MainApp() {
     if (transitioning.current) return;
     transitioning.current = true;
     try {
-      lastSourceRef.current = '';
+      sourceBySegmentRef.current.clear();
+      committedSegmentsRef.current.clear();
+      currentSegmentIDRef.current = 0;
       if (paused) {
         await (SessionService as any).ResumeInterpret();
       } else {
@@ -431,7 +504,7 @@ function MainApp() {
     setTargetLang(sourceLang);
   };
 
-  const showLiveDraft = Boolean(sourceText) && sourceText !== lastSourceRef.current;
+  const showLiveDraft = Boolean(sourceText) && !committedSegmentsRef.current.has(currentSegmentIDRef.current);
   const statusTone = running ? 'running' : paused ? 'paused' : 'idle';
 
   return (

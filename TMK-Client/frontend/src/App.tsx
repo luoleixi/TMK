@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { SessionService, CaptureService, SettingsService, ExportService, WindowService } from '../bindings/changeme';
+import { SessionService } from '../bindings/changeme/internal/client/session';
+import { CaptureService } from '../bindings/changeme/internal/client/capture';
+import { SettingsService } from '../bindings/changeme/internal/client/settings';
+import { ExportService } from '../bindings/changeme/internal/client/export';
+import { WindowService } from '../bindings/changeme/internal/client/window';
 import { Events } from '@wailsio/runtime';
 import {
   ArrowRightLeft,

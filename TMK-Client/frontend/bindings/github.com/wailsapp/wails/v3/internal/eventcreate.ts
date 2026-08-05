@@ -8,7 +8,7 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as main$0 from "../../../../../changeme/models.js";
+import * as session$0 from "../../../../../changeme/internal/client/session/models.js";
 
 function configure() {
     Object.freeze(Object.assign($Create.Events, {
@@ -18,7 +18,7 @@ function configure() {
 }
 
 // Private type creation functions
-const $$createType0 = main$0.TranscriptMsg.createFrom;
-const $$createType1 = main$0.TranslationMsg.createFrom;
+const $$createType0 = session$0.TranscriptMsg.createFrom;
+const $$createType1 = session$0.TranslationMsg.createFrom;
 
 configure();

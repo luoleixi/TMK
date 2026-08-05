@@ -111,7 +111,11 @@ func (s *Segmenter) Push(input Input, now time.Time) []Segment {
 
 	for s.consumed < len(combinedRunes) {
 		remainder := combinedRunes[s.consumed:]
-		if boundary := punctuationBoundary(remainder, stableLimit-s.consumed); boundary > 0 {
+		stableWindow := stableLimit - s.consumed
+		if stableWindow > s.config.MaxRunes {
+			stableWindow = s.config.MaxRunes
+		}
+		if boundary := punctuationBoundary(remainder, stableWindow); boundary > 0 {
 			output = append(output, s.emitFinal(string(remainder[:boundary]), ReasonPunctuation, now))
 			s.consumed += boundary
 			continue

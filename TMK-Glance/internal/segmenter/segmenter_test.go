@@ -109,3 +109,11 @@ func TestMaxRunesCountsUnicodeCodePoints(t *testing.T) {
 		t.Fatalf("unexpected unicode split: %+v", output)
 	}
 }
+
+func TestFinalPunctuationCannotBypassMaxRunes(t *testing.T) {
+	s := New(Config{MaxRunes: 4, MaxDuration: time.Hour, SoftCommitDelay: time.Second})
+	output := s.Push(Input{Text: "\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u3002", IsFinal: true}, time.Now())
+	if len(output) != 2 || output[0].Text != "\u4e00\u4e8c\u4e09\u56db" || output[0].Reason != ReasonMaxLength || output[1].Text != "\u4e94\u516d\u3002" {
+		t.Fatalf("final punctuation bypassed max runes: %+v", output)
+	}
+}

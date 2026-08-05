@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func handleListHistory(c *gin.Context) {
+func (a *Application) handleListHistory(c *gin.Context) {
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	if limit < 1 || limit > 100 {
@@ -24,7 +24,7 @@ func handleListHistory(c *gin.Context) {
 		toTime = &t
 	}
 
-	filtered, total, err := sessionStore.Search(keyword, sourceLang, targetLang, fromTime, toTime, limit, offset)
+	filtered, total, err := a.store.Search(keyword, sourceLang, targetLang, fromTime, toTime, limit, offset)
 	if err != nil {
 		log.Printf("[db] search history failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "list history failed"})
@@ -32,7 +32,7 @@ func handleListHistory(c *gin.Context) {
 	}
 	for _, ses := range filtered {
 		if ses.Brief == "" && ses.RecordCount > 0 && ses.Status != "active" {
-			queueSessionBrief(ses.ID)
+			a.queueSessionBrief(ses.ID)
 		}
 	}
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{
@@ -40,8 +40,8 @@ func handleListHistory(c *gin.Context) {
 	}})
 }
 
-func handleGetHistory(c *gin.Context) {
-	ses, ok, err := sessionStore.Get(c.Param("id"))
+func (a *Application) handleGetHistory(c *gin.Context) {
+	ses, ok, err := a.store.Get(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] get history session failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "get history failed"})
@@ -51,7 +51,7 @@ func handleGetHistory(c *gin.Context) {
 		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
 		return
 	}
-	records, _, err := sessionStore.Records(ses.ID)
+	records, _, err := a.store.Records(ses.ID)
 	if err != nil {
 		log.Printf("[db] get history records failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "get history failed"})
@@ -64,8 +64,8 @@ func handleGetHistory(c *gin.Context) {
 	}})
 }
 
-func handleDeleteHistory(c *gin.Context) {
-	ok, err := sessionStore.Delete(c.Param("id"))
+func (a *Application) handleDeleteHistory(c *gin.Context) {
+	ok, err := a.store.Delete(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] delete history failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "delete history failed"})
@@ -78,7 +78,7 @@ func handleDeleteHistory(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "message": "ok"})
 }
 
-func handleDeleteHistoryBatch(c *gin.Context) {
+func (a *Application) handleDeleteHistoryBatch(c *gin.Context) {
 	var req struct {
 		IDs []string `json:"ids"`
 	}
@@ -90,7 +90,7 @@ func handleDeleteHistoryBatch(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 400, "message": "ids are required"})
 		return
 	}
-	deleted, err := sessionStore.DeleteMany(req.IDs)
+	deleted, err := a.store.DeleteMany(req.IDs)
 	if err != nil {
 		log.Printf("[db] batch delete history failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "delete history failed"})

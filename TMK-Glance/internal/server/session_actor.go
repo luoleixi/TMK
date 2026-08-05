@@ -30,6 +30,8 @@ type sessionActor struct {
 	sessionID     string
 	store         *store.SessionStore
 	translatorSvc translator.Translator
+	asrFactory    func(string) asr.ASR
+	queueBrief    func(string)
 
 	asrEngine       asr.ASR
 	asrCtx          context.Context
@@ -47,12 +49,14 @@ type sessionActor struct {
 	seq              int64
 }
 
-func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store.SessionStore, translatorSvc translator.Translator, segmenterConfig segmenter.Config) *sessionActor {
+func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store.SessionStore, translatorSvc translator.Translator, segmenterConfig segmenter.Config, asrFactory func(string) asr.ASR, queueBrief func(string)) *sessionActor {
 	return &sessionActor{
 		conn:            conn,
 		sessionID:       sessionID,
 		store:           sessionStore,
 		translatorSvc:   translatorSvc,
+		asrFactory:      asrFactory,
+		queueBrief:      queueBrief,
 		segmenterConfig: segmenterConfig,
 		asrCancel:       func() {},
 		sendCh:          make(chan any, sendQueueSize),
@@ -110,7 +114,9 @@ func (a *sessionActor) cleanup() {
 	if ended, err := a.store.End(a.sessionID); err != nil {
 		log.Printf("[db] end session failed: %v", err)
 	} else if ended {
-		queueSessionBrief(a.sessionID)
+		if a.queueBrief != nil {
+			a.queueBrief(a.sessionID)
+		}
 	}
 }
 
@@ -173,7 +179,7 @@ func (a *sessionActor) startInterpret() {
 	}
 
 	a.asrCtx, a.asrCancel = context.WithCancel(context.Background())
-	a.asrEngine = newASR(ses.SourceLang)
+	a.asrEngine = a.asrFactory(ses.SourceLang)
 	a.audioCh = make(chan []byte, audioQueueSize)
 
 	resultCh, err := a.asrEngine.Recognize(a.asrCtx, a.audioCh)

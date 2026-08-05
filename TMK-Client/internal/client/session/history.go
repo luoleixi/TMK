@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-
-	runtimeconfig "changeme/internal/client/runtime"
 )
 
 func (s *SessionService) ListHistory(offset, limit int) ([]HistorySession, int, error) {
@@ -15,7 +13,7 @@ func (s *SessionService) ListHistory(offset, limit int) ([]HistorySession, int, 
 }
 
 func (s *SessionService) SearchHistory(offset, limit int, keyword, dateFrom, dateTo string) ([]HistorySession, int, error) {
-	u, err := url.Parse(runtimeconfig.BackendAPIURL() + "/history")
+	u, err := url.Parse(s.apiURL() + "/history")
 	if err != nil {
 		return nil, 0, fmt.Errorf("history url: %w", err)
 	}
@@ -32,7 +30,7 @@ func (s *SessionService) SearchHistory(offset, limit int, keyword, dateFrom, dat
 		q.Set("date_to", dateTo)
 	}
 	u.RawQuery = q.Encode()
-	resp, err := http.Get(u.String())
+	resp, err := s.httpClient.Get(u.String())
 	if err != nil {
 		return nil, 0, fmt.Errorf("list history: %w", err)
 	}
@@ -50,7 +48,7 @@ func (s *SessionService) SearchHistory(offset, limit int, keyword, dateFrom, dat
 }
 
 func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
-	resp, err := http.Get(runtimeconfig.BackendAPIURL() + "/history/" + url.PathEscape(sessionID))
+	resp, err := s.httpClient.Get(s.apiURL() + "/history/" + url.PathEscape(sessionID))
 	if err != nil {
 		return nil, fmt.Errorf("get history: %w", err)
 	}
@@ -68,7 +66,7 @@ func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
 }
 
 func (s *SessionService) SummarizeHistory(sessionID string) (string, error) {
-	resp, err := http.Post(runtimeconfig.BackendAPIURL()+"/history/"+url.PathEscape(sessionID)+"/summary", "application/json", nil)
+	resp, err := s.httpClient.Post(s.apiURL()+"/history/"+url.PathEscape(sessionID)+"/summary", "application/json", nil)
 	if err != nil {
 		return "", fmt.Errorf("summarize history: %w", err)
 	}
@@ -91,11 +89,11 @@ func (s *SessionService) SummarizeHistory(sessionID string) (string, error) {
 }
 
 func (s *SessionService) DeleteHistory(sessionID string) error {
-	req, err := http.NewRequest(http.MethodDelete, runtimeconfig.BackendAPIURL()+"/history/"+url.PathEscape(sessionID), nil)
+	req, err := http.NewRequest(http.MethodDelete, s.apiURL()+"/history/"+url.PathEscape(sessionID), nil)
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("delete history: %w", err)
 	}
@@ -111,7 +109,7 @@ func (s *SessionService) DeleteHistoryBatch(ids []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	resp, err := http.Post(runtimeconfig.BackendAPIURL()+"/history/delete", "application/json", bytes.NewReader(body))
+	resp, err := s.httpClient.Post(s.apiURL()+"/history/delete", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return 0, fmt.Errorf("delete history batch: %w", err)
 	}

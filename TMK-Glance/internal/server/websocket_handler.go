@@ -13,7 +13,7 @@ import (
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
-func handleInterpret(c *gin.Context) {
+func (a *Application) handleInterpret(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("[ws] upgrade failed: %v", err)
@@ -22,7 +22,7 @@ func handleInterpret(c *gin.Context) {
 	defer conn.Close()
 
 	sessionID := c.Query("session_id")
-	if _, ok, err := sessionStore.Get(sessionID); err != nil {
+	if _, ok, err := a.store.Get(sessionID); err != nil {
 		log.Printf("[db] validate session failed: %v", err)
 		_ = conn.WriteJSON(gin.H{"type": "error", "message": "database error"})
 		return
@@ -32,10 +32,10 @@ func handleInterpret(c *gin.Context) {
 	}
 
 	log.Printf("[ws] client connected, session: %s", sessionID)
-	actor := newSessionActor(conn, sessionID, sessionStore, translateSvc, segmenter.Config{
-		MaxRunes:        asrCfg.ASR.Segmenter.MaxRunes,
-		MaxDuration:     time.Duration(asrCfg.ASR.Segmenter.MaxDurationMS) * time.Millisecond,
-		SoftCommitDelay: time.Duration(asrCfg.ASR.Segmenter.SoftCommitDelayMS) * time.Millisecond,
-	})
+	actor := newSessionActor(conn, sessionID, a.store, a.translator, segmenter.Config{
+		MaxRunes:        a.cfg.ASR.Segmenter.MaxRunes,
+		MaxDuration:     time.Duration(a.cfg.ASR.Segmenter.MaxDurationMS) * time.Millisecond,
+		SoftCommitDelay: time.Duration(a.cfg.ASR.Segmenter.SoftCommitDelayMS) * time.Millisecond,
+	}, a.asrFactory, a.queueSessionBrief)
 	actor.run()
 }

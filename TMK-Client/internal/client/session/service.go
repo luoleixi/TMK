@@ -17,23 +17,34 @@ import (
 )
 
 type SessionService struct {
-	mu        sync.Mutex
-	writeMu   sync.Mutex
-	conn      *websocket.Conn
-	running   bool
-	paused    bool
-	sessionID string
-	epoch     uint64
+	mu           sync.Mutex
+	writeMu      sync.Mutex
+	conn         *websocket.Conn
+	running      bool
+	paused       bool
+	sessionID    string
+	epoch        uint64
+	httpClient   *http.Client
+	apiURL       func() string
+	webSocketURL func(string, url.Values) (string, error)
+	dialer       *websocket.Dialer
 }
 
-func NewService() *SessionService { return &SessionService{} }
+func NewService() *SessionService {
+	return &SessionService{
+		httpClient:   &http.Client{Timeout: 15 * time.Second},
+		apiURL:       runtimeconfig.BackendAPIURL,
+		webSocketURL: runtimeconfig.BackendWebSocketURL,
+		dialer:       websocket.DefaultDialer,
+	}
+}
 
 func (s *SessionService) CreateSession(sourceLang, targetLang, inputType string) (string, error) {
 	body, err := json.Marshal(map[string]string{"source_lang": sourceLang, "target_lang": targetLang, "input_type": inputType})
 	if err != nil {
 		return "", fmt.Errorf("encode session: %w", err)
 	}
-	resp, err := http.Post(runtimeconfig.BackendAPIURL()+"/sessions", "application/json", bytes.NewReader(body))
+	resp, err := s.httpClient.Post(s.apiURL()+"/sessions", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create session: %w", err)
 	}
@@ -74,11 +85,11 @@ func (s *SessionService) StartInterpret() error {
 	}
 
 	q := url.Values{"session_id": []string{sessionID}}
-	wsURL, err := runtimeconfig.BackendWebSocketURL("/interpret", q)
+	wsURL, err := s.webSocketURL("/interpret", q)
 	if err != nil {
 		return err
 	}
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := s.dialer.Dial(wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"tmk-glance/internal/model"
@@ -13,10 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var briefJobs sync.Map
-
-func handleSummarizeHistory(c *gin.Context) {
-	ses, ok, err := sessionStore.Get(c.Param("id"))
+func (a *Application) handleSummarizeHistory(c *gin.Context) {
+	ses, ok, err := a.store.Get(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] get summary session failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "summarize history failed"})
@@ -30,7 +27,7 @@ func handleSummarizeHistory(c *gin.Context) {
 		c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"summary": ses.Summary}})
 		return
 	}
-	records, _, err := sessionStore.Records(ses.ID)
+	records, _, err := a.store.Records(ses.ID)
 	if err != nil {
 		log.Printf("[db] get summary records failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "summarize history failed"})
@@ -40,13 +37,13 @@ func handleSummarizeHistory(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 400, "message": "no records to summarize"})
 		return
 	}
-	summary, err := summarizeRecords(c.Request.Context(), records)
+	summary, err := a.summarizeRecords(c.Request.Context(), records)
 	if err != nil {
 		log.Printf("[summary] generate failed: %v", err)
 		c.JSON(502, gin.H{"code": 502, "message": err.Error()})
 		return
 	}
-	if err := sessionStore.UpdateSummary(ses.ID, summary); err != nil {
+	if err := a.store.UpdateSummary(ses.ID, summary); err != nil {
 		log.Printf("[db] update summary failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "save summary failed"})
 		return
@@ -54,16 +51,16 @@ func handleSummarizeHistory(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"summary": summary}})
 }
 
-func summarizeRecords(ctx context.Context, records []model.Record) (string, error) {
+func (a *Application) summarizeRecords(ctx context.Context, records []model.Record) (string, error) {
 	content := buildConversationText(records, true)
 	systemPrompt := "你是同声传译会话摘要助手。请使用中文输出不超过120字的摘要，包含主要话题、结论和待办事项；只返回摘要正文。"
-	return translateSvc.Generate(ctx, systemPrompt, content)
+	return a.translator.Generate(ctx, systemPrompt, content)
 }
 
-func generateBrief(ctx context.Context, records []model.Record) (string, error) {
+func (a *Application) generateBrief(ctx context.Context, records []model.Record) (string, error) {
 	content := buildConversationText(records, false)
 	systemPrompt := "你是会话主题命名助手。请用8到24个中文字符概括会话主要内容，输出一个简短主题短语，不要写‘总结’或‘摘要’，不要解释。"
-	brief, err := translateSvc.Generate(ctx, systemPrompt, content)
+	brief, err := a.translator.Generate(ctx, systemPrompt, content)
 	if err != nil {
 		return "", err
 	}
@@ -105,36 +102,36 @@ func truncateRunes(value string, max int) string {
 	return string(runes[:max])
 }
 
-func queueSessionBrief(sessionID string) {
+func (a *Application) queueSessionBrief(sessionID string) {
 	if sessionID == "" {
 		return
 	}
-	if _, loaded := briefJobs.LoadOrStore(sessionID, struct{}{}); loaded {
+	if _, loaded := a.briefJobs.LoadOrStore(sessionID, struct{}{}); loaded {
 		return
 	}
 	go func() {
-		defer briefJobs.Delete(sessionID)
+		defer a.briefJobs.Delete(sessionID)
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		ses, ok, err := sessionStore.Get(sessionID)
+		ses, ok, err := a.store.Get(sessionID)
 		if err != nil || !ok || ses.Brief != "" || ses.RecordCount == 0 {
 			if err != nil {
 				log.Printf("[brief] get session failed, session=%s err=%v", sessionID, err)
 			}
 			return
 		}
-		records, _, err := sessionStore.Records(sessionID)
+		records, _, err := a.store.Records(sessionID)
 		if err != nil {
 			log.Printf("[brief] get records failed, session=%s err=%v", sessionID, err)
 			return
 		}
-		brief, err := generateBrief(ctx, records)
+		brief, err := a.generateBrief(ctx, records)
 		if err != nil {
 			log.Printf("[brief] generate failed, session=%s err=%v", sessionID, err)
 			return
 		}
-		if err := sessionStore.UpdateBrief(sessionID, brief); err != nil {
+		if err := a.store.UpdateBrief(sessionID, brief); err != nil {
 			log.Printf("[brief] save failed, session=%s err=%v", sessionID, err)
 		}
 	}()

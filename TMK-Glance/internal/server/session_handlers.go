@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func handleCreateSession(c *gin.Context) {
+func (a *Application) handleCreateSession(c *gin.Context) {
 	var req struct {
 		SourceLang string `json:"source_lang"`
 		TargetLang string `json:"target_lang"`
@@ -32,7 +32,7 @@ func handleCreateSession(c *gin.Context) {
 		ID: uuid.New().String(), SourceLang: req.SourceLang, TargetLang: req.TargetLang,
 		InputType: req.InputType, Status: "ready", CreatedAt: time.Now(),
 	}
-	if err := sessionStore.Create(ses); err != nil {
+	if err := a.store.Create(ses); err != nil {
 		log.Printf("[db] create session failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "create session failed"})
 		return
@@ -40,8 +40,8 @@ func handleCreateSession(c *gin.Context) {
 	c.JSON(201, gin.H{"code": 0, "message": "ok", "data": ses})
 }
 
-func handleGetSession(c *gin.Context) {
-	ses, ok, err := sessionStore.Get(c.Param("id"))
+func (a *Application) handleGetSession(c *gin.Context) {
+	ses, ok, err := a.store.Get(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] get session failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "get session failed"})
@@ -54,8 +54,8 @@ func handleGetSession(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": ses})
 }
 
-func handleStopSession(c *gin.Context) {
-	ok, err := sessionStore.End(c.Param("id"))
+func (a *Application) handleStopSession(c *gin.Context) {
+	ok, err := a.store.End(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] stop session failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "stop session failed"})
@@ -65,7 +65,7 @@ func handleStopSession(c *gin.Context) {
 		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
 		return
 	}
-	queueSessionBrief(c.Param("id"))
+	a.queueSessionBrief(c.Param("id"))
 	c.JSON(200, gin.H{"code": 0, "message": "ok"})
 }
 

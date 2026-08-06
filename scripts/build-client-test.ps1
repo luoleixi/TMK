@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $clientRoot = Join-Path $repoRoot "TMK-Client"
-$backendConfigPath = Join-Path $clientRoot "backend_config.go"
+$backendConfigPath = Join-Path $clientRoot "internal\client\runtime\backend_config.go"
 $managedEnvironmentVariables = @(
     "TMK_ENV",
     "APP_ENV",

@@ -26,9 +26,10 @@ type Config struct {
 			PunctuationPredictionEnabled bool   `yaml:"punctuation_prediction_enabled"`
 		} `yaml:"bailian"`
 		Segmenter struct {
-			MaxRunes          int `yaml:"max_runes"`
-			MaxDurationMS     int `yaml:"max_duration_ms"`
-			SoftCommitDelayMS int `yaml:"soft_commit_delay_ms"`
+			Enabled           bool `yaml:"enabled"`
+			MaxRunes          int  `yaml:"max_runes"`
+			MaxDurationMS     int  `yaml:"max_duration_ms"`
+			SoftCommitDelayMS int  `yaml:"soft_commit_delay_ms"`
 		} `yaml:"segmenter"`
 	} `yaml:"asr"`
 	Translator struct {
@@ -54,6 +55,7 @@ func Load(path string) (*Config, error) {
 	cfg.ASR.Bailian.MultiThresholdModeEnabled = true
 	cfg.ASR.Bailian.PunctuationPredictionEnabled = true
 	cfg.ASR.Segmenter.MaxRunes = 40
+	cfg.ASR.Segmenter.Enabled = true
 	cfg.ASR.Segmenter.MaxDurationMS = 5000
 	cfg.ASR.Segmenter.SoftCommitDelayMS = 300
 	cfg.Translator.Provider = "mock"

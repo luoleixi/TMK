@@ -15,6 +15,8 @@ storage:
   db_path: ./tmk.db
 asr:
   provider: mock
+  segmenter:
+    enabled: false
 translator:
   provider: mock
 `)
@@ -46,7 +48,7 @@ translator:
 	if cfg.ASR.Bailian.MaxSentenceSilenceMS != 750 {
 		t.Fatalf("max sentence silence = %d, want 750", cfg.ASR.Bailian.MaxSentenceSilenceMS)
 	}
-	if cfg.ASR.Segmenter.MaxRunes != 40 || cfg.ASR.Segmenter.MaxDurationMS != 5000 || cfg.ASR.Segmenter.SoftCommitDelayMS != 300 {
+	if cfg.ASR.Segmenter.Enabled || cfg.ASR.Segmenter.MaxRunes != 40 || cfg.ASR.Segmenter.MaxDurationMS != 5000 || cfg.ASR.Segmenter.SoftCommitDelayMS != 300 {
 		t.Fatalf("unexpected segmenter defaults: %+v", cfg.ASR.Segmenter)
 	}
 }

@@ -15,6 +15,7 @@ asr:
     multi_threshold_mode_enabled: true
     punctuation_prediction_enabled: true
   segmenter:
+    enabled: true
     max_runes: 40
     max_duration_ms: 5000
     soft_commit_delay_ms: 300

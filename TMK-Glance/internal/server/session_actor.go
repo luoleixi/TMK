@@ -49,6 +49,51 @@ type sessionActor struct {
 	seq              int64
 }
 
+// providerStream preserves provider sentence boundaries when local segmentation
+// is disabled. It does not split text; it only adapts cumulative ASR events to
+// the existing segment protocol.
+type providerStream struct {
+	segmentID int64
+	revision  int64
+	text      string
+}
+
+func newProviderStream() *providerStream { return &providerStream{segmentID: 1} }
+
+func (p *providerStream) push(result asr.Result) []segmenter.Segment {
+	if result.Text == "" {
+		return nil
+	}
+	p.revision++
+	segment := segmenter.Segment{
+		ID: p.segmentID, Revision: p.revision, Text: result.Text,
+		IsFinal: result.IsFinal, Reason: segmenter.ReasonPartial,
+	}
+	p.text = result.Text
+	if result.IsFinal {
+		segment.Reason = segmenter.ReasonProviderFinal
+		p.segmentID++
+		p.revision = 0
+		p.text = ""
+	}
+	return []segmenter.Segment{segment}
+}
+
+func (p *providerStream) flush() []segmenter.Segment {
+	if p.text == "" {
+		return nil
+	}
+	p.revision++
+	segment := segmenter.Segment{
+		ID: p.segmentID, Revision: p.revision, Text: p.text,
+		IsFinal: true, Reason: segmenter.ReasonFlush,
+	}
+	p.segmentID++
+	p.revision = 0
+	p.text = ""
+	return []segmenter.Segment{segment}
+}
+
 func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store.SessionStore, translatorSvc translator.Translator, segmenterConfig segmenter.Config, asrFactory func(string) asr.ASR, queueBrief func(string)) *sessionActor {
 	return &sessionActor{
 		conn:            conn,
@@ -205,6 +250,7 @@ func (a *sessionActor) startInterpret() {
 func (a *sessionActor) consumeASRResults(resultCh <-chan asr.Result, scheduler *translationScheduler, done chan<- struct{}) {
 	defer close(done)
 	stream := segmenter.New(a.segmenterConfig)
+	provider := newProviderStream()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -213,19 +259,31 @@ func (a *sessionActor) consumeASRResults(resultCh <-chan asr.Result, scheduler *
 		case result, ok := <-resultCh:
 			now := time.Now()
 			if !ok {
-				a.publishSegments(stream.Flush(now), scheduler)
+				if a.segmenterConfig.Enabled {
+					a.publishSegments(stream.Flush(now), scheduler)
+				} else {
+					a.publishSegments(provider.flush(), scheduler)
+				}
 				return
 			}
-			a.publishSegments(stream.Push(segmenter.Input{
-				Text:        result.Text,
-				IsFinal:     result.IsFinal,
-				BeginTimeMS: result.BeginTimeMS,
-				EndTimeMS:   result.EndTimeMS,
-			}, now), scheduler)
+			if a.segmenterConfig.Enabled {
+				a.publishSegments(stream.Push(segmenter.Input{
+					Text: result.Text, IsFinal: result.IsFinal,
+					BeginTimeMS: result.BeginTimeMS, EndTimeMS: result.EndTimeMS,
+				}, now), scheduler)
+			} else {
+				a.publishSegments(provider.push(result), scheduler)
+			}
 		case now := <-ticker.C:
-			a.publishSegments(stream.Tick(now), scheduler)
+			if a.segmenterConfig.Enabled {
+				a.publishSegments(stream.Tick(now), scheduler)
+			}
 		case <-a.asrCtx.Done():
-			a.publishSegments(stream.Flush(time.Now()), scheduler)
+			if a.segmenterConfig.Enabled {
+				a.publishSegments(stream.Flush(time.Now()), scheduler)
+			} else {
+				a.publishSegments(provider.flush(), scheduler)
+			}
 			return
 		}
 	}

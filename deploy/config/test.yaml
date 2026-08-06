@@ -11,10 +11,11 @@ asr:
   bailian:
     api_key: ""
     max_sentence_silence_ms: 600
-    semantic_punctuation_enabled: false
-    multi_threshold_mode_enabled: true
+    semantic_punctuation_enabled: true
+    multi_threshold_mode_enabled: false
     punctuation_prediction_enabled: true
   segmenter:
+    enabled: false
     max_runes: 40
     max_duration_ms: 5000
     soft_commit_delay_ms: 300

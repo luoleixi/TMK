@@ -33,6 +33,7 @@ func (a *Application) handleInterpret(c *gin.Context) {
 
 	log.Printf("[ws] client connected, session: %s", sessionID)
 	actor := newSessionActor(conn, sessionID, a.store, a.translator, segmenter.Config{
+		Enabled:         a.cfg.ASR.Segmenter.Enabled,
 		MaxRunes:        a.cfg.ASR.Segmenter.MaxRunes,
 		MaxDuration:     time.Duration(a.cfg.ASR.Segmenter.MaxDurationMS) * time.Millisecond,
 		SoftCommitDelay: time.Duration(a.cfg.ASR.Segmenter.SoftCommitDelayMS) * time.Millisecond,

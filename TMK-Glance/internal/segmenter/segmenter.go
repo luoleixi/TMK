@@ -18,6 +18,7 @@ const (
 )
 
 type Config struct {
+	Enabled         bool
 	MaxRunes        int
 	MaxDuration     time.Duration
 	SoftCommitDelay time.Duration

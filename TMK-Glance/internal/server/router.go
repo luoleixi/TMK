@@ -51,7 +51,6 @@ func (a *Application) Router() *gin.Engine {
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/languages", handleLanguages)
-		v1.GET("/audio/devices", handleAudioDevices)
 		v1.POST("/sessions", a.handleCreateSession)
 		v1.GET("/sessions/:id", a.handleGetSession)
 		v1.POST("/sessions/:id/stop", a.handleStopSession)

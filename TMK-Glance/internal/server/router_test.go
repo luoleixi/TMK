@@ -102,3 +102,12 @@ func TestRouterRejectsInvalidRequestsAndHandlesCORS(t *testing.T) {
 		t.Fatalf("CORS response status=%d headers=%v", options.Code, options.Header())
 	}
 }
+
+func TestLegacyAudioDevicesRouteIsRemoved(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestApplication(t, "removed-audio-devices").Router()
+	response := requestJSON(router, http.MethodGet, "/api/v1/audio/devices", nil)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("legacy audio devices status=%d body=%s", response.Code, response.Body.String())
+	}
+}

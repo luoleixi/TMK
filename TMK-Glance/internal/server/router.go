@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"tmk-glance/internal/adminui"
 	"tmk-glance/internal/asr"
 	"tmk-glance/internal/config"
 	"tmk-glance/internal/evaluation"
@@ -103,6 +104,12 @@ func (a *Application) Router() *gin.Engine {
 	r.Use(corsMiddleware(a.cfg.Server.AllowedOrigins))
 
 	r.GET("/api/health", handleHealth)
+	adminAssets := adminui.Handler()
+	r.GET("/admin", gin.WrapH(adminAssets))
+	r.GET("/admin/*path", func(c *gin.Context) {
+		c.Request.URL.Path = c.Param("path")
+		adminAssets.ServeHTTP(c.Writer, c.Request)
+	})
 
 	v1 := r.Group("/api/v1")
 	{

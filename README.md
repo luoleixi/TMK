@@ -26,7 +26,7 @@ TMK 是一个实时同声传译桌面应用，支持将麦克风或系统音频�
 
 详细的需求分析、异常处理策略、API 接口规范及客户端/服务端职责划分，见 [docs/需求分析.md](docs/需求分析.md)。
 
-服务端身份鉴权见 [docs/身份与权限设计.md](docs/身份与权限设计.md)，音频/文本对象存储与评测数据集见 [docs/对象存储与数据集设计.md](docs/对象存储与数据集设计.md)，后台评测队列与指标见 [docs/异步评测任务设计.md](docs/异步评测任务设计.md)，聚合仪表盘、审计查询与保留期治理见 [docs/仪表盘与生产数据治理设计.md](docs/仪表盘与生产数据治理设计.md)。
+服务端身份鉴权见 [docs/身份与权限设计.md](docs/身份与权限设计.md)，音频/文本对象存储与评测数据集见 [docs/对象存储与数据集设计.md](docs/对象存储与数据集设计.md)，后台评测队列与指标见 [docs/异步评测任务设计.md](docs/异步评测任务设计.md)，聚合仪表盘、审计查询与保留期治理见 [docs/仪表盘与生产数据治理设计.md](docs/仪表盘与生产数据治理设计.md)，Web 管理后台及部署方式见 [docs/TMK-Admin设计与部署.md](docs/TMK-Admin设计与部署.md)。
 
 ### 技术栈
 
@@ -37,6 +37,7 @@ TMK 是一个实时同声传译桌面应用，支持将麦克风或系统音频�
 | 实时通信 | Gorilla WebSocket |
 | 桌面框架 | Wails v3 |
 | 前端 UI | React 18 + TypeScript + Vite |
+| Web 管理后台 | React 18 + TypeScript + Vite，静态资源内嵌 Go 服务 |
 | 音频采集 | Windows WaveIn / WASAPI (go-wca) |
 | ASR 引擎 | 阿里云百炼 paraformer-realtime-v2 |
 | 翻译引擎 | 阿里云百炼 qwen-turbo |

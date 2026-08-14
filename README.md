@@ -26,12 +26,14 @@ TMK 是一个实时同声传译桌面应用，支持将麦克风或系统音频�
 
 详细的需求分析、异常处理策略、API 接口规范及客户端/服务端职责划分，见 [docs/需求分析.md](docs/需求分析.md)。
 
+服务端身份鉴权见 [docs/身份与权限设计.md](docs/身份与权限设计.md)，音频/文本对象存储与评测数据集见 [docs/对象存储与数据集设计.md](docs/对象存储与数据集设计.md)，后台评测队列与指标见 [docs/异步评测任务设计.md](docs/异步评测任务设计.md)。
+
 ### 技术栈
 
 | 组件 | 技术 |
 |------|------|
 | 后端框架 | Go + Gin |
-| 数据库 | SQLite (modernc.org/sqlite) |
+| 数据库 | MySQL（SQLite 用于本地开发与测试） |
 | 实时通信 | Gorilla WebSocket |
 | 桌面框架 | Wails v3 |
 | 前端 UI | React 18 + TypeScript + Vite |
@@ -47,7 +49,8 @@ TMK 是一个实时同声传译桌面应用，支持将麦克风或系统音频�
 |------|------|
 | [gin-gonic/gin](https://github.com/gin-gonic/gin) | HTTP Web 框架，路由与中间件 |
 | [gorilla/websocket](https://github.com/gorilla/websocket) | WebSocket 实现，实时双向通信 |
-| [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | 纯 Go 实现的 SQLite，无需 CGO |
+| [go-sql-driver/mysql](https://github.com/go-sql-driver/mysql) | 生产环境 MySQL 驱动 |
+| [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | 本地开发与测试存储，无需 CGO |
 | [google/uuid](https://github.com/google/uuid) | UUID 生成，会话唯一标识 |
 | [gopkg.in/yaml.v3](https://gopkg.in/yaml.v3) | YAML 配置文件解析 |
 

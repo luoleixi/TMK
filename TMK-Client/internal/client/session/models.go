@@ -1,5 +1,14 @@
 package session
 
+type AuthUser struct {
+	ID                 string `json:"id"`
+	Email              string `json:"email"`
+	DisplayName        string `json:"display_name"`
+	Role               string `json:"role"`
+	Status             string `json:"status"`
+	MustChangePassword bool   `json:"must_change_password"`
+}
+
 type TranscriptMsg struct {
 	Seq       int64  `json:"seq"`
 	SegmentID int64  `json:"segment_id"`

@@ -32,11 +32,11 @@ type Input struct {
 }
 
 type Segment struct {
-	ID       int64
-	Revision int64
-	Text     string
-	IsFinal  bool
-	Reason   string
+	ID       int64  `json:"id"`
+	Revision int64  `json:"revision"`
+	Text     string `json:"text"`
+	IsFinal  bool   `json:"is_final"`
+	Reason   string `json:"reason"`
 }
 
 type pendingSegment struct {

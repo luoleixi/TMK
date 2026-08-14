@@ -94,6 +94,7 @@ func migrateSQLite(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS sessions (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
 			session_id   TEXT NOT NULL UNIQUE,
+			user_id      TEXT,
 			source_lang  TEXT NOT NULL,
 			target_lang  TEXT NOT NULL,
 			input_type   TEXT NOT NULL DEFAULT 'system_audio',
@@ -102,7 +103,8 @@ func migrateSQLite(db *sql.DB) error {
 			brief        TEXT NOT NULL DEFAULT '',
 			summary      TEXT NOT NULL DEFAULT '',
 			created_at   TEXT NOT NULL,
-			ended_at     TEXT
+			ended_at     TEXT,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 		);
 		CREATE TABLE IF NOT EXISTS records (
 			id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,7 +129,21 @@ func migrateSQLite(db *sql.DB) error {
 	if err != nil && !isDuplicateColumnError(err) {
 		return err
 	}
-	return nil
+	_, err = db.Exec(`ALTER TABLE sessions ADD COLUMN user_id TEXT`)
+	if err != nil && !isDuplicateColumnError(err) {
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_user_created ON sessions(user_id, created_at)`)
+	if err != nil {
+		return err
+	}
+	if err := migrateAuthSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateDatasetSQLite(db); err != nil {
+		return err
+	}
+	return migrateEvaluationSQLite(db)
 }
 
 func migrateMySQL(db *sql.DB) error {
@@ -135,6 +151,7 @@ func migrateMySQL(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS sessions (
 			id           BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
 			session_id   VARCHAR(64) NOT NULL UNIQUE,
+			user_id      VARCHAR(36) NULL,
 			source_lang  VARCHAR(32) NOT NULL,
 			target_lang  VARCHAR(32) NOT NULL,
 			input_type   VARCHAR(32) NOT NULL DEFAULT 'system_audio',
@@ -144,7 +161,8 @@ func migrateMySQL(db *sql.DB) error {
 			summary      TEXT NOT NULL,
 			created_at   VARCHAR(40) NOT NULL,
 			ended_at     VARCHAR(40) NULL,
-			INDEX idx_sessions_created_at (created_at)
+			INDEX idx_sessions_created_at (created_at),
+			INDEX idx_sessions_user_created (user_id, created_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 	`)
 	if err != nil {
@@ -175,21 +193,42 @@ func migrateMySQL(db *sql.DB) error {
 	if err != nil && !isDuplicateColumnError(err) {
 		return err
 	}
+	_, err = db.Exec(`ALTER TABLE sessions ADD COLUMN user_id VARCHAR(36) NULL`)
+	if err != nil && !isDuplicateColumnError(err) {
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX idx_sessions_user_created ON sessions(user_id, created_at)`)
+	if err != nil && !isDuplicateIndexError(err) {
+		return err
+	}
 	_, err = db.Exec(`UPDATE sessions SET summary='' WHERE summary IS NULL`)
 	if err != nil {
 		return err
 	}
 	_, err = db.Exec(`UPDATE sessions SET brief='' WHERE brief IS NULL`)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := migrateAuthMySQL(db); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE sessions ADD CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL`)
+	if err != nil && !isDuplicateConstraintError(err) {
+		return err
+	}
+	if err := migrateDatasetMySQL(db); err != nil {
+		return err
+	}
+	return migrateEvaluationMySQL(db)
 }
 
 func (s *SessionStore) Create(ses *model.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO sessions (session_id, source_lang, target_lang, input_type, status, record_count, brief, summary, created_at)
-		 VALUES (?, ?, ?, ?, ?, 0, '', '', ?)`,
-		ses.ID, ses.SourceLang, ses.TargetLang, ses.InputType, ses.Status, ses.CreatedAt.Format(time.RFC3339Nano),
+		`INSERT INTO sessions (session_id, user_id, source_lang, target_lang, input_type, status, record_count, brief, summary, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 0, '', '', ?)`,
+		ses.ID, nullableString(ses.UserID), ses.SourceLang, ses.TargetLang, ses.InputType, ses.Status, ses.CreatedAt.Format(time.RFC3339Nano),
 	)
 	return err
 }
@@ -202,7 +241,7 @@ func (s *SessionStore) Get(id string) (*model.Session, bool, error) {
 
 func (s *SessionStore) getTx(id string) (*model.Session, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT session_id, source_lang, target_lang, input_type, status, record_count, brief, summary, created_at, ended_at
+		`SELECT session_id, user_id, source_lang, target_lang, input_type, status, record_count, brief, summary, created_at, ended_at
 		 FROM sessions WHERE session_id = ?`, id,
 	)
 	return scanSession(row)
@@ -212,7 +251,7 @@ func (s *SessionStore) List() ([]*model.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(
-		`SELECT session_id, source_lang, target_lang, input_type, status, record_count, brief, summary, created_at, ended_at
+		`SELECT session_id, user_id, source_lang, target_lang, input_type, status, record_count, brief, summary, created_at, ended_at
 		 FROM sessions ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -236,11 +275,11 @@ func (s *SessionStore) List() ([]*model.Session, error) {
 	return result, nil
 }
 
-func (s *SessionStore) Search(keyword, sourceLang, targetLang string, dateFrom, dateTo *time.Time, limit, offset int) ([]*model.Session, int, error) {
+func (s *SessionStore) Search(userID, keyword, sourceLang, targetLang string, dateFrom, dateTo *time.Time, limit, offset int) ([]*model.Session, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `SELECT DISTINCT s.session_id, s.source_lang, s.target_lang, s.input_type, s.status, s.record_count, s.brief, s.summary, s.created_at, s.ended_at
+	query := `SELECT DISTINCT s.session_id, s.user_id, s.source_lang, s.target_lang, s.input_type, s.status, s.record_count, s.brief, s.summary, s.created_at, s.ended_at
 		FROM sessions s
 		LEFT JOIN records r ON r.session_id = s.session_id
 		WHERE 1=1`
@@ -255,6 +294,7 @@ func (s *SessionStore) Search(keyword, sourceLang, targetLang string, dateFrom, 
 		countQuery += clause
 		args = append(args, values...)
 	}
+	add(" AND s.user_id = ?", userID)
 	if sourceLang != "" {
 		add(" AND s.source_lang = ?", sourceLang)
 	}
@@ -418,6 +458,27 @@ func (s *SessionStore) Records(sessionID string) ([]model.Record, bool, error) {
 	return recs, true, nil
 }
 
+func (s *SessionStore) IsSessionOwner(sessionID, userID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var exists int
+	err := s.db.QueryRow(`SELECT 1 FROM sessions WHERE session_id=? AND user_id=?`, sessionID, userID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (s *SessionStore) ClaimUnownedSessions(userID string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, err := s.db.Exec(`UPDATE sessions SET user_id=? WHERE user_id IS NULL OR user_id=''`, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (s *SessionStore) Delete(id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -483,6 +544,7 @@ func (s *SessionStore) Close() error {
 func scanSession(row interface{ Scan(...interface{}) error }) (*model.Session, bool, error) {
 	var (
 		id           string
+		userID       sql.NullString
 		sourceLang   string
 		targetLang   string
 		inputType    string
@@ -493,7 +555,7 @@ func scanSession(row interface{ Scan(...interface{}) error }) (*model.Session, b
 		createdAtStr string
 		endedAtStr   sql.NullString
 	)
-	if err := row.Scan(&id, &sourceLang, &targetLang, &inputType, &status, &recordCount, &brief, &summary, &createdAtStr, &endedAtStr); err != nil {
+	if err := row.Scan(&id, &userID, &sourceLang, &targetLang, &inputType, &status, &recordCount, &brief, &summary, &createdAtStr, &endedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, false, nil
 		}
@@ -505,6 +567,7 @@ func scanSession(row interface{ Scan(...interface{}) error }) (*model.Session, b
 	}
 	ses := &model.Session{
 		ID:          id,
+		UserID:      userID.String,
 		SourceLang:  sourceLang,
 		TargetLang:  targetLang,
 		InputType:   inputType,
@@ -531,4 +594,21 @@ func scanSessionFromRows(rows *sql.Rows) (*model.Session, bool, error) {
 func isDuplicateColumnError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "duplicate column name")
+}
+
+func isDuplicateIndexError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate key name") || strings.Contains(msg, "already exists")
+}
+
+func isDuplicateConstraintError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate foreign key constraint name") || strings.Contains(msg, "constraint") && strings.Contains(msg, "already exists")
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }

@@ -20,12 +20,21 @@ func newTestApplication(t *testing.T, name string) *Application {
 	cfg.Storage.DBPath = filepath.Join(t.TempDir(), name+".db")
 	cfg.ASR.Provider = "mock"
 	cfg.Translator.Provider = "mock"
+	cfg.Auth.BootstrapAdminEmail = "test@example.com"
+	cfg.Auth.BootstrapAdminPassword = "test-password-123"
 	cfg.ASR.Segmenter.MaxRunes = 40
 	cfg.ASR.Segmenter.MaxDurationMS = 5000
 	cfg.ASR.Segmenter.SoftCommitDelayMS = 300
 	app, err := NewApplication(cfg)
 	if err != nil {
 		t.Fatalf("new application: %v", err)
+	}
+	user, ok, err := app.store.GetUserByEmail("test@example.com")
+	if err != nil || !ok {
+		t.Fatalf("get bootstrap test user: ok=%v err=%v", ok, err)
+	}
+	if _, err := app.store.UpdateUser(user.ID, "Test User", user.Role, user.Status, false); err != nil {
+		t.Fatalf("prepare test user: %v", err)
 	}
 	t.Cleanup(func() { _ = app.Close() })
 	return app
@@ -41,12 +50,30 @@ func requestJSON(router http.Handler, method, path string, body []byte) *httptes
 	return response
 }
 
+func authorizedRequestJSON(t *testing.T, app *Application, method, path string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	user, ok, err := app.store.GetUserByEmail("test@example.com")
+	if err != nil || !ok {
+		t.Fatalf("get test user: ok=%v err=%v", ok, err)
+	}
+	pair, err := app.issueTokenPair(user)
+	if err != nil {
+		t.Fatalf("issue test token: %v", err)
+	}
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
+	response := httptest.NewRecorder()
+	app.Router().ServeHTTP(response, req)
+	return response
+}
+
 func TestRouterSessionAndHistoryLifecycle(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	app := newTestApplication(t, "lifecycle")
-	router := app.Router()
-
-	created := requestJSON(router, http.MethodPost, "/api/v1/sessions", []byte(`{"source_lang":"zh","target_lang":"en","input_type":"system_audio"}`))
+	created := authorizedRequestJSON(t, app, http.MethodPost, "/api/v1/sessions", []byte(`{"source_lang":"zh","target_lang":"en","input_type":"system_audio"}`))
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
 	}
@@ -59,15 +86,15 @@ func TestRouterSessionAndHistoryLifecycle(t *testing.T) {
 		t.Fatalf("decode created session: id=%q err=%v", payload.Data.ID, err)
 	}
 
-	got := requestJSON(router, http.MethodGet, "/api/v1/sessions/"+payload.Data.ID, nil)
+	got := authorizedRequestJSON(t, app, http.MethodGet, "/api/v1/sessions/"+payload.Data.ID, nil)
 	if got.Code != http.StatusOK {
 		t.Fatalf("get status=%d body=%s", got.Code, got.Body.String())
 	}
-	history := requestJSON(router, http.MethodGet, "/api/v1/history?limit=20", nil)
+	history := authorizedRequestJSON(t, app, http.MethodGet, "/api/v1/history?limit=20", nil)
 	if history.Code != http.StatusOK || !bytes.Contains(history.Body.Bytes(), []byte(payload.Data.ID)) {
 		t.Fatalf("history status=%d body=%s", history.Code, history.Body.String())
 	}
-	translated := requestJSON(router, http.MethodPost, "/api/v1/translate", []byte(`{"text":"hello","source_lang":"en","target_lang":"zh"}`))
+	translated := authorizedRequestJSON(t, app, http.MethodPost, "/api/v1/translate", []byte(`{"text":"hello","source_lang":"en","target_lang":"zh"}`))
 	if translated.Code != http.StatusOK {
 		t.Fatalf("translate status=%d body=%s", translated.Code, translated.Body.String())
 	}
@@ -77,14 +104,14 @@ func TestApplicationsKeepStoresIsolated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	first := newTestApplication(t, "first")
 	second := newTestApplication(t, "second")
-	created := requestJSON(first.Router(), http.MethodPost, "/api/v1/sessions", []byte(`{"source_lang":"zh","target_lang":"en"}`))
+	created := authorizedRequestJSON(t, first, http.MethodPost, "/api/v1/sessions", []byte(`{"source_lang":"zh","target_lang":"en"}`))
 	var payload struct {
 		Data struct {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(created.Body.Bytes(), &payload)
-	response := requestJSON(second.Router(), http.MethodGet, "/api/v1/sessions/"+payload.Data.ID, nil)
+	response := authorizedRequestJSON(t, second, http.MethodGet, "/api/v1/sessions/"+payload.Data.ID, nil)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("second application leaked first store: status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -92,13 +119,13 @@ func TestApplicationsKeepStoresIsolated(t *testing.T) {
 
 func TestRouterRejectsInvalidRequestsAndHandlesCORS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := newTestApplication(t, "validation").Router()
-	invalid := requestJSON(router, http.MethodPost, "/api/v1/sessions", []byte(`{"source_lang":"zh"}`))
+	app := newTestApplication(t, "validation")
+	invalid := authorizedRequestJSON(t, app, http.MethodPost, "/api/v1/sessions", []byte(`{"source_lang":"zh"}`))
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid session status=%d", invalid.Code)
 	}
-	options := requestJSON(router, http.MethodOptions, "/api/v1/history", nil)
-	if options.Code != http.StatusOK || options.Header().Get("Access-Control-Allow-Origin") != "*" {
+	options := requestJSON(app.Router(), http.MethodOptions, "/api/v1/history", nil)
+	if options.Code != http.StatusNoContent || options.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("CORS response status=%d headers=%v", options.Code, options.Header())
 	}
 }

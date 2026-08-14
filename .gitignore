@@ -6,6 +6,11 @@
 
 # Documentation
 docs/
+!docs/
+docs/*
+!docs/身份与权限设计.md
+!docs/对象存储与数据集设计.md
+!docs/异步评测任务设计.md
 CLAUDE.md
 
 # Build output

@@ -73,17 +73,14 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 	log.Printf("[asr:bailian] task started: %s", taskID)
 
 	out := make(chan Result, 32)
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+	}()
 
 	// audio sender
 	go func() {
-		defer func() {
-			b.sendFinishTask(taskID)
-			b.mu.Lock()
-			b.conn = nil
-			b.mu.Unlock()
-			conn.Close()
-			log.Printf("[asr:bailian] stopped")
-		}()
+		defer b.sendFinishTask(taskID)
 
 		var bcnt int
 		for {
@@ -108,7 +105,16 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 
 	// result receiver
 	go func() {
-		defer close(out)
+		defer func() {
+			close(out)
+			b.mu.Lock()
+			if b.conn == conn {
+				b.conn = nil
+			}
+			b.mu.Unlock()
+			_ = conn.Close()
+			log.Printf("[asr:bailian] stopped")
+		}()
 		for {
 			_, raw, err := conn.ReadMessage()
 			if err != nil {

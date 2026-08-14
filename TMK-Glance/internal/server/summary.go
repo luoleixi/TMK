@@ -13,6 +13,9 @@ import (
 )
 
 func (a *Application) handleSummarizeHistory(c *gin.Context) {
+	if !a.requireSessionOwner(c, c.Param("id")) {
+		return
+	}
 	ses, ok, err := a.store.Get(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] get summary session failed: %v", err)

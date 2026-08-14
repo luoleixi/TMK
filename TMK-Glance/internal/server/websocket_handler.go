@@ -3,6 +3,8 @@ package server
 import (
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"tmk-glance/internal/segmenter"
@@ -11,9 +13,20 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	return err == nil && strings.EqualFold(parsed.Host, r.Host)
+}}
 
 func (a *Application) handleInterpret(c *gin.Context) {
+	sessionID := c.Query("session_id")
+	if !a.requireSessionOwner(c, sessionID) {
+		return
+	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("[ws] upgrade failed: %v", err)
@@ -21,7 +34,6 @@ func (a *Application) handleInterpret(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	sessionID := c.Query("session_id")
 	if _, ok, err := a.store.Get(sessionID); err != nil {
 		log.Printf("[db] validate session failed: %v", err)
 		_ = conn.WriteJSON(gin.H{"type": "error", "message": "database error"})

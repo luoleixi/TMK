@@ -7,6 +7,7 @@ export {
 };
 
 export {
+    AuthUser,
     HistoryDetail,
     HistoryRecord,
     HistorySession,

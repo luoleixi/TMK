@@ -10,6 +10,8 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "${script_dir}/.." && pwd)
 
 install -m 0755 "${repo_root}/scripts/deploy-server.sh" /usr/local/sbin/tmk-deploy
+install -m 0755 "${repo_root}/scripts/configure-auth.sh" /usr/local/sbin/tmk-configure-auth
+install -m 0755 "${repo_root}/scripts/clear-bootstrap-auth.sh" /usr/local/sbin/tmk-clear-bootstrap-auth
 install -m 0644 "${repo_root}/deploy/systemd/tmk-glance@.service" /etc/systemd/system/tmk-glance@.service
 
 for environment in test production; do
@@ -47,4 +49,7 @@ for environment in test production; do
 done
 
 systemctl daemon-reload
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "warning: ffmpeg is not installed; async evaluation is limited to 16kHz 16-bit mono PCM WAV" >&2
+fi
 echo "TMK host layout installed; no application service was started"

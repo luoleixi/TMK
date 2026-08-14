@@ -33,6 +33,13 @@ type Config struct {
 		ItemTimeoutSeconds int `yaml:"item_timeout_seconds"`
 		ChunkIntervalMS    int `yaml:"chunk_interval_ms"`
 	} `yaml:"evaluation"`
+	Governance struct {
+		SessionRetentionDays    int `yaml:"session_retention_days"`
+		EvaluationRetentionDays int `yaml:"evaluation_retention_days"`
+		AuditRetentionDays      int `yaml:"audit_retention_days"`
+		StaleDraftDays          int `yaml:"stale_draft_days"`
+		StuckJobMinutes         int `yaml:"stuck_job_minutes"`
+	} `yaml:"governance"`
 	Auth struct {
 		AccessTokenTTLMinutes  int    `yaml:"access_token_ttl_minutes"`
 		RefreshTokenTTLDays    int    `yaml:"refresh_token_ttl_days"`
@@ -84,6 +91,11 @@ func Load(path string) (*Config, error) {
 	cfg.Evaluation.PollIntervalMS = 500
 	cfg.Evaluation.ItemTimeoutSeconds = 600
 	cfg.Evaluation.ChunkIntervalMS = 100
+	cfg.Governance.SessionRetentionDays = 180
+	cfg.Governance.EvaluationRetentionDays = 365
+	cfg.Governance.AuditRetentionDays = 365
+	cfg.Governance.StaleDraftDays = 30
+	cfg.Governance.StuckJobMinutes = 30
 	cfg.Auth.AccessTokenTTLMinutes = 15
 	cfg.Auth.RefreshTokenTTLDays = 30
 	cfg.ASR.Provider = "mock"
@@ -139,6 +151,11 @@ func Load(path string) (*Config, error) {
 	applyIntEnv("EVALUATION_POLL_INTERVAL_MS", &cfg.Evaluation.PollIntervalMS)
 	applyIntEnv("EVALUATION_ITEM_TIMEOUT_SECONDS", &cfg.Evaluation.ItemTimeoutSeconds)
 	applyIntEnv("EVALUATION_CHUNK_INTERVAL_MS", &cfg.Evaluation.ChunkIntervalMS)
+	applyIntEnv("GOVERNANCE_SESSION_RETENTION_DAYS", &cfg.Governance.SessionRetentionDays)
+	applyIntEnv("GOVERNANCE_EVALUATION_RETENTION_DAYS", &cfg.Governance.EvaluationRetentionDays)
+	applyIntEnv("GOVERNANCE_AUDIT_RETENTION_DAYS", &cfg.Governance.AuditRetentionDays)
+	applyIntEnv("GOVERNANCE_STALE_DRAFT_DAYS", &cfg.Governance.StaleDraftDays)
+	applyIntEnv("GOVERNANCE_STUCK_JOB_MINUTES", &cfg.Governance.StuckJobMinutes)
 	if v := os.Getenv("AUTH_ACCESS_TOKEN_TTL_MINUTES"); v != "" {
 		if value, parseErr := strconv.Atoi(v); parseErr == nil {
 			cfg.Auth.AccessTokenTTLMinutes = value
@@ -193,8 +210,22 @@ func Load(path string) (*Config, error) {
 	if cfg.Evaluation.ChunkIntervalMS < 0 || cfg.Evaluation.ChunkIntervalMS > 1000 {
 		cfg.Evaluation.ChunkIntervalMS = 100
 	}
+	cfg.Governance.SessionRetentionDays = boundedDays(cfg.Governance.SessionRetentionDays, 180)
+	cfg.Governance.EvaluationRetentionDays = boundedDays(cfg.Governance.EvaluationRetentionDays, 365)
+	cfg.Governance.AuditRetentionDays = boundedDays(cfg.Governance.AuditRetentionDays, 365)
+	cfg.Governance.StaleDraftDays = boundedDays(cfg.Governance.StaleDraftDays, 30)
+	if cfg.Governance.StuckJobMinutes < 5 || cfg.Governance.StuckJobMinutes > 1440 {
+		cfg.Governance.StuckJobMinutes = 30
+	}
 
 	return cfg, nil
+}
+
+func boundedDays(value, fallback int) int {
+	if value < 1 || value > 3650 {
+		return fallback
+	}
+	return value
 }
 
 func applyInt64Env(name string, target *int64) {

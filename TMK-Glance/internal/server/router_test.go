@@ -25,6 +25,11 @@ func newTestApplication(t *testing.T, name string) *Application {
 	cfg.ASR.Segmenter.MaxRunes = 40
 	cfg.ASR.Segmenter.MaxDurationMS = 5000
 	cfg.ASR.Segmenter.SoftCommitDelayMS = 300
+	cfg.Governance.SessionRetentionDays = 180
+	cfg.Governance.EvaluationRetentionDays = 365
+	cfg.Governance.AuditRetentionDays = 365
+	cfg.Governance.StaleDraftDays = 30
+	cfg.Governance.StuckJobMinutes = 30
 	app, err := NewApplication(cfg)
 	if err != nil {
 		t.Fatalf("new application: %v", err)

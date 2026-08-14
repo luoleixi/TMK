@@ -23,6 +23,13 @@ evaluation:
   item_timeout_seconds: 600
   chunk_interval_ms: 100
 
+governance:
+  session_retention_days: 180
+  evaluation_retention_days: 365
+  audit_retention_days: 365
+  stale_draft_days: 30
+  stuck_job_minutes: 30
+
 auth:
   access_token_ttl_minutes: 15
   refresh_token_ttl_days: 30

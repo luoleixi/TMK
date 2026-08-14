@@ -42,6 +42,8 @@ translator:
 	t.Setenv("OBJECT_STORAGE_TOTAL_QUOTA_BYTES", "987654")
 	t.Setenv("EVALUATION_WORKERS", "3")
 	t.Setenv("EVALUATION_ITEM_TIMEOUT_SECONDS", "120")
+	t.Setenv("GOVERNANCE_SESSION_RETENTION_DAYS", "90")
+	t.Setenv("GOVERNANCE_STUCK_JOB_MINUTES", "45")
 
 	cfg, err := Load(configPath)
 	if err != nil {
@@ -73,5 +75,8 @@ translator:
 	}
 	if cfg.Evaluation.Workers != 3 || cfg.Evaluation.ItemTimeoutSeconds != 120 {
 		t.Fatalf("evaluation overrides not applied: %+v", cfg.Evaluation)
+	}
+	if cfg.Governance.SessionRetentionDays != 90 || cfg.Governance.StuckJobMinutes != 45 || cfg.Governance.AuditRetentionDays != 365 {
+		t.Fatalf("governance overrides not applied: %+v", cfg.Governance)
 	}
 }

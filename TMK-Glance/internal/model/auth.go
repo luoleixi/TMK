@@ -33,13 +33,14 @@ type AuthToken struct {
 }
 
 type AuditEvent struct {
-	ActorUserID  string
-	Action       string
-	ResourceType string
-	ResourceID   string
-	IPAddress    string
-	UserAgent    string
-	Result       string
-	DetailsJSON  string
-	CreatedAt    time.Time
+	ID           int64     `json:"id"`
+	ActorUserID  string    `json:"actor_user_id,omitempty"`
+	Action       string    `json:"action"`
+	ResourceType string    `json:"resource_type"`
+	ResourceID   string    `json:"resource_id"`
+	IPAddress    string    `json:"ip_address"`
+	UserAgent    string    `json:"user_agent"`
+	Result       string    `json:"result"`
+	DetailsJSON  string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
 }

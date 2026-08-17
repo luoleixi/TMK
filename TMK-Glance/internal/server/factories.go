@@ -23,6 +23,9 @@ func newASR(cfg *config.Config, language string) asr.ASR {
 			MultiThresholdModeEnabled:    cfg.ASR.Bailian.MultiThresholdModeEnabled,
 			PunctuationPredictionEnabled: cfg.ASR.Bailian.PunctuationPredictionEnabled,
 		})
+	case "loadtest":
+		log.Println("[asr] using load-test provider")
+		return asr.NewLoadTest()
 	default:
 		log.Println("[asr] using Mock")
 		return asr.NewMock()

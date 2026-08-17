@@ -28,6 +28,7 @@ type config struct {
 	ramp          time.Duration
 	hold          time.Duration
 	pingInterval  time.Duration
+	audioInterval time.Duration
 }
 
 type apiEnvelope[T any] struct {
@@ -45,9 +46,11 @@ type sessionData struct {
 }
 
 type liveConnection struct {
-	conn  *websocket.Conn
-	alive atomic.Bool
-	done  chan struct{}
+	conn          *websocket.Conn
+	alive         atomic.Bool
+	done          chan struct{}
+	framesSent    atomic.Int64
+	writeFailures atomic.Int64
 }
 
 type report struct {
@@ -67,6 +70,8 @@ type report struct {
 	ElapsedSeconds         float64        `json:"elapsed_seconds"`
 	Errors                 map[string]int `json:"errors,omitempty"`
 	CleanupDeleted         int            `json:"cleanup_deleted"`
+	AudioFramesSent        int64          `json:"audio_frames_sent"`
+	AudioWriteFailures     int64          `json:"audio_write_failures"`
 }
 
 func main() {
@@ -105,6 +110,14 @@ func main() {
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "load test complete"), time.Now().Add(time.Second))
 		_ = connection.conn.Close()
 	}
+	for _, connection := range connections {
+		select {
+		case <-connection.done:
+		case <-time.After(time.Second):
+		}
+		result.AudioFramesSent += connection.framesSent.Load()
+		result.AudioWriteFailures += connection.writeFailures.Load()
+	}
 	result.DisconnectedDuringHold = result.HandshakeSucceeded - result.StableConnections
 	result.CleanupDeleted = cleanupSessions(client, cfg, token, sessionIDs, result.Errors)
 	result.ElapsedSeconds = time.Since(started).Seconds()
@@ -125,6 +138,7 @@ func parseFlags() config {
 	flag.DurationVar(&cfg.ramp, "ramp", 10*time.Second, "connection ramp duration")
 	flag.DurationVar(&cfg.hold, "hold", 60*time.Second, "stable connection hold duration")
 	flag.DurationVar(&cfg.pingInterval, "ping-interval", 15*time.Second, "WebSocket control ping interval")
+	flag.DurationVar(&cfg.audioInterval, "audio-interval", 0, "send 3200-byte PCM frames at this interval; zero keeps connections idle")
 	flag.Parse()
 	cfg.baseURL = strings.TrimRight(strings.TrimSpace(cfg.baseURL), "/")
 	if cfg.baseURL == "" || cfg.email == "" || cfg.connections < 1 || cfg.createWorkers < 1 || cfg.ramp < 0 || cfg.hold < 0 {
@@ -216,7 +230,14 @@ func openConnections(cfg config, token string, sessionIDs []string) ([]*liveConn
 			}
 			live := &liveConnection{conn: connection, done: make(chan struct{})}
 			live.alive.Store(true)
-			go maintainConnection(live, cfg.pingInterval)
+			if cfg.audioInterval > 0 {
+				if err := connection.WriteJSON(map[string]string{"type": "start"}); err != nil {
+					_ = connection.Close()
+					results <- outcome{latency: latency, err: err}
+					return
+				}
+			}
+			go maintainConnection(live, cfg.pingInterval, cfg.audioInterval)
 			results <- outcome{connection: live, latency: latency}
 		}(sessionID)
 	}
@@ -236,29 +257,47 @@ func openConnections(cfg config, token string, sessionIDs []string) ([]*liveConn
 	return connections, latencies, errorsByKind
 }
 
-func maintainConnection(connection *liveConnection, pingInterval time.Duration) {
-	defer func() {
-		connection.alive.Store(false)
-		close(connection.done)
-	}()
-	if pingInterval > 0 {
-		go func() {
-			ticker := time.NewTicker(pingInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					if err := connection.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
-						return
-					}
-				case <-connection.done:
-					return
-				}
-			}
-		}()
-	}
+func maintainConnection(connection *liveConnection, pingInterval, audioInterval time.Duration) {
+	writerDone := make(chan struct{})
+	go maintainWrites(connection, pingInterval, audioInterval, writerDone)
 	for {
 		if _, _, err := connection.conn.ReadMessage(); err != nil {
+			break
+		}
+	}
+	connection.alive.Store(false)
+	close(connection.done)
+	<-writerDone
+}
+
+func maintainWrites(connection *liveConnection, pingInterval, audioInterval time.Duration, done chan<- struct{}) {
+	defer close(done)
+	var ping, audio <-chan time.Time
+	var pingTicker, audioTicker *time.Ticker
+	if pingInterval > 0 {
+		pingTicker = time.NewTicker(pingInterval)
+		defer pingTicker.Stop()
+		ping = pingTicker.C
+	}
+	if audioInterval > 0 {
+		audioTicker = time.NewTicker(audioInterval)
+		defer audioTicker.Stop()
+		audio = audioTicker.C
+	}
+	frame := make([]byte, 3200)
+	for {
+		select {
+		case <-ping:
+			if err := connection.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+				return
+			}
+		case <-audio:
+			if err := connection.conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+				connection.writeFailures.Add(1)
+				return
+			}
+			connection.framesSent.Add(1)
+		case <-connection.done:
 			return
 		}
 	}

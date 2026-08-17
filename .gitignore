@@ -14,6 +14,7 @@ docs/*
 !docs/仪表盘与生产数据治理设计.md
 !docs/TMK-Admin设计与部署.md
 !docs/健康检测设计.md
+!docs/可观测性设计.md
 CLAUDE.md
 
 # Build output

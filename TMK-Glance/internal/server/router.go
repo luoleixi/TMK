@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tmk-glance/internal/adminui"
@@ -15,6 +16,7 @@ import (
 	"tmk-glance/internal/health"
 	"tmk-glance/internal/model"
 	"tmk-glance/internal/objectstore"
+	"tmk-glance/internal/observability"
 	"tmk-glance/internal/store"
 	"tmk-glance/internal/translator"
 
@@ -22,15 +24,20 @@ import (
 )
 
 type Application struct {
-	cfg          *config.Config
-	store        *store.SessionStore
-	translator   translator.Translator
-	briefJobs    sync.Map
-	loginLimiter *loginLimiter
-	objectStore  *objectstore.Local
-	evaluations  *evaluation.Manager
-	uploadMu     sync.Mutex
-	asrFactory   func(string) asr.ASR
+	cfg             *config.Config
+	store           *store.SessionStore
+	translator      translator.Translator
+	briefJobs       sync.Map
+	loginLimiter    *loginLimiter
+	objectStore     *objectstore.Local
+	evaluations     *evaluation.Manager
+	uploadMu        sync.Mutex
+	asrFactory      func(string) asr.ASR
+	metrics         *observability.Metrics
+	samplerStop     chan struct{}
+	samplerDone     chan struct{}
+	databaseHealthy atomic.Bool
+	storageHealthy  atomic.Bool
 }
 
 func SetupRouter(cfg *config.Config) *gin.Engine {
@@ -51,6 +58,7 @@ func NewApplication(cfg *config.Config) (*Application, error) {
 		cfg: cfg, store: sessionStore, translator: newTranslator(cfg),
 		loginLimiter: newLoginLimiter(),
 		asrFactory:   func(language string) asr.ASR { return newASR(cfg, language) },
+		metrics:      observability.NewMetrics(), samplerStop: make(chan struct{}),
 	}
 	if err := app.bootstrapAdmin(); err != nil {
 		_ = sessionStore.Close()
@@ -82,18 +90,26 @@ func NewApplication(cfg *config.Config) (*Application, error) {
 		}, evaluation.Config{
 			Workers: cfg.Evaluation.Workers, PollInterval: time.Duration(cfg.Evaluation.PollIntervalMS) * time.Millisecond,
 			ItemTimeout: time.Duration(cfg.Evaluation.ItemTimeoutSeconds) * time.Second, ChunkInterval: chunkInterval,
-			MaxTextBytes: cfg.ObjectStorage.MaxTextBytes,
+			MaxTextBytes: cfg.ObjectStorage.MaxTextBytes, Metrics: app.metrics,
 		})
 	if err := app.evaluations.Start(); err != nil {
 		_ = sessionStore.Close()
 		return nil, fmt.Errorf("start evaluation workers: %w", err)
 	}
-	health.SetReady(true)
+	app.startRuntimeSampler()
+	app.registerHealthChecks()
 	return app, nil
 }
 
 func (a *Application) Close() error {
 	health.SetReady(false)
+	a.metrics.SetReady(false)
+	close(a.samplerStop)
+	if a.samplerDone != nil {
+		<-a.samplerDone
+	}
+	health.Register("database", nil)
+	health.Register("object_storage", nil)
 	if a.evaluations != nil {
 		a.evaluations.Close()
 	}
@@ -101,12 +117,13 @@ func (a *Application) Close() error {
 }
 
 func (a *Application) Router() *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
 	r.MaxMultipartMemory = 8 << 20
 
 	_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
-	r.Use(corsMiddleware(a.cfg.Server.AllowedOrigins))
+	r.Use(gin.Recovery(), a.observabilityMiddleware(), corsMiddleware(a.cfg.Server.AllowedOrigins))
 
+	r.GET("/metrics", a.metricsHandler)
 	r.GET("/api/health", handleHealth)
 	r.GET("/api/health/live", handleHealthLive)
 	r.GET("/api/health/ready", handleHealthReady)

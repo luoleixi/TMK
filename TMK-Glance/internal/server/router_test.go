@@ -110,8 +110,15 @@ func TestHealthEndpointsDistinguishLivenessAndReadiness(t *testing.T) {
 	app := newTestApplication(t, "health")
 	router := app.Router()
 	live := requestJSON(router, http.MethodGet, "/api/health/live", nil)
-	if live.Code != http.StatusOK || !bytes.Contains(live.Body.Bytes(), []byte(`"status":"alive"`)) {
+	if live.Code != http.StatusOK || live.Header().Get(requestIDHeader) == "" || !bytes.Contains(live.Body.Bytes(), []byte(`"status":"alive"`)) {
 		t.Fatalf("live status=%d body=%s", live.Code, live.Body.String())
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/health/live", nil)
+	request.Header.Set(requestIDHeader, "test-request-id-123")
+	withID := httptest.NewRecorder()
+	router.ServeHTTP(withID, request)
+	if withID.Header().Get(requestIDHeader) != "test-request-id-123" {
+		t.Fatalf("request id response=%q", withID.Header().Get(requestIDHeader))
 	}
 	ready := requestJSON(router, http.MethodGet, "/api/health/ready", nil)
 	if ready.Code != http.StatusOK || !bytes.Contains(ready.Body.Bytes(), []byte(`"ready":true`)) {

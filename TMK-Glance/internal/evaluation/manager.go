@@ -15,6 +15,7 @@ import (
 	"tmk-glance/internal/asr"
 	"tmk-glance/internal/model"
 	"tmk-glance/internal/objectstore"
+	"tmk-glance/internal/observability"
 	"tmk-glance/internal/segmenter"
 	"tmk-glance/internal/store"
 
@@ -27,6 +28,7 @@ type Config struct {
 	ItemTimeout   time.Duration
 	ChunkInterval time.Duration
 	MaxTextBytes  int64
+	Metrics       *observability.Metrics
 }
 
 type Manager struct {
@@ -115,6 +117,12 @@ func (m *Manager) worker(number int) {
 }
 
 func (m *Manager) runJob(job *model.EvaluationJob) {
+	outcome := model.EvaluationJobFailed
+	defer func() {
+		if m.config.Metrics != nil {
+			m.config.Metrics.EvaluationJob(string(outcome))
+		}
+	}()
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.activeMu.Lock()
 	m.activeJobs[job.ID] = cancel
@@ -137,9 +145,13 @@ func (m *Manager) runJob(job *model.EvaluationJob) {
 	}
 	for _, item := range items {
 		if ctx.Err() != nil {
+			outcome = model.EvaluationJobCancelled
 			return
 		}
 		result := m.evaluateItem(ctx, job, item)
+		if result.Status == model.EvaluationResultFailed {
+			outcome = model.EvaluationJobCompletedWithErrors
+		}
 		if err := m.store.SaveEvaluationResult(result); err != nil {
 			if !errors.Is(err, store.ErrJobNotRunning) {
 				log.Printf("[evaluation] save result job=%s item=%s: %v", job.ID, item.DatasetItemID, err)
@@ -149,6 +161,9 @@ func (m *Manager) runJob(job *model.EvaluationJob) {
 		}
 	}
 	_, _ = m.store.FinishEvaluationJob(job.ID, false, "")
+	if outcome != model.EvaluationJobCompletedWithErrors {
+		outcome = model.EvaluationJobSucceeded
+	}
 }
 
 func (m *Manager) evaluateItem(parent context.Context, job *model.EvaluationJob, item model.EvaluationWorkItem) *model.EvaluationResult {
@@ -163,6 +178,9 @@ func (m *Manager) evaluateItem(parent context.Context, job *model.EvaluationJob,
 		result.Status = model.EvaluationResultSucceeded
 	}
 	result.CompletedAt = time.Now().UTC()
+	if m.config.Metrics != nil {
+		m.config.Metrics.EvaluationItem(string(result.Status), time.Since(started))
+	}
 	return result
 }
 

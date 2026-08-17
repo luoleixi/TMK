@@ -1,8 +1,13 @@
 package server
 
-import "github.com/gin-gonic/gin"
+import (
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
 
 func (a *Application) handleTranslate(c *gin.Context) {
+	started := time.Now()
 	var req struct {
 		Text       string `json:"text"`
 		SourceLang string `json:"source_lang"`
@@ -18,8 +23,10 @@ func (a *Application) handleTranslate(c *gin.Context) {
 	}
 	result, err := a.translator.Translate(c.Request.Context(), req.SourceLang, req.TargetLang, req.Text)
 	if err != nil {
+		a.metrics.Translation("http", "error", time.Since(started))
 		c.JSON(502, gin.H{"code": 502, "message": err.Error()})
 		return
 	}
+	a.metrics.Translation("http", "success", time.Since(started))
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"translated_text": result}})
 }

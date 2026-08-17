@@ -539,6 +539,23 @@ func (s *SessionStore) Close() error {
 	return s.db.Close()
 }
 
+func (s *SessionStore) Ping() error { return s.db.Ping() }
+
+func (s *SessionStore) DBStats() sql.DBStats { return s.db.Stats() }
+
+func (s *SessionStore) ObservabilitySnapshot() (queued, running, storageBytes int64, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err = s.db.QueryRow(`SELECT
+		COALESCE(SUM(CASE WHEN status='queued' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0)
+		FROM evaluation_jobs`).Scan(&queued, &running); err != nil {
+		return 0, 0, 0, err
+	}
+	err = s.db.QueryRow(`SELECT COALESCE(SUM(size_bytes),0) FROM storage_objects WHERE status='ready'`).Scan(&storageBytes)
+	return queued, running, storageBytes, err
+}
+
 // ---------- internal helpers ----------
 
 func scanSession(row interface{ Scan(...interface{}) error }) (*model.Session, bool, error) {

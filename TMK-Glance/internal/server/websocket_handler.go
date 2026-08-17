@@ -33,6 +33,8 @@ func (a *Application) handleInterpret(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
+	a.metrics.WebSocketOpened()
+	defer a.metrics.WebSocketClosed()
 
 	if _, ok, err := a.store.Get(sessionID); err != nil {
 		log.Printf("[db] validate session failed: %v", err)
@@ -49,6 +51,6 @@ func (a *Application) handleInterpret(c *gin.Context) {
 		MaxRunes:        a.cfg.ASR.Segmenter.MaxRunes,
 		MaxDuration:     time.Duration(a.cfg.ASR.Segmenter.MaxDurationMS) * time.Millisecond,
 		SoftCommitDelay: time.Duration(a.cfg.ASR.Segmenter.SoftCommitDelayMS) * time.Millisecond,
-	}, a.asrFactory, a.queueSessionBrief)
+	}, a.asrFactory, a.queueSessionBrief, a.metrics)
 	actor.run()
 }

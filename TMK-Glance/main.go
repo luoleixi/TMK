@@ -11,10 +11,16 @@ import (
 	"time"
 
 	"tmk-glance/internal/config"
+	"tmk-glance/internal/observability"
 	"tmk-glance/internal/server"
 )
 
 func main() {
+	environment := strings.TrimSpace(os.Getenv("TMK_ENVIRONMENT"))
+	if environment == "" {
+		environment = "development"
+	}
+	observability.ConfigureLogging(environment)
 	configPath := strings.TrimSpace(os.Getenv("TMK_CONFIG"))
 	if configPath == "" {
 		configPath = "config.yaml"

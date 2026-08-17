@@ -1,0 +1,53 @@
+groups:
+  - name: tmk-availability
+    rules:
+      - alert: TMKReadinessFailed
+        expr: up == 0 or tmk_application_ready == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK metrics endpoint is unavailable
+          description: Prometheus cannot scrape a TMK environment.
+      - alert: TMKHighHTTP5xxRate
+        expr: sum(rate(tmk_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(tmk_http_requests_total[5m])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK HTTP 5xx rate is high
+      - alert: TMKEvaluationQueueBacklog
+        expr: tmk_evaluation_jobs_queued > 20
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK evaluation queue is backing up
+      - alert: TMKObjectStorageLowDisk
+        expr: tmk_object_storage_free_bytes < 2147483648
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK object storage free space is low
+      - alert: TMKAudioDropRateHigh
+        expr: sum(rate(tmk_websocket_audio_chunks_total{result="dropped"}[5m])) / clamp_min(sum(rate(tmk_websocket_audio_chunks_total[5m])), 0.001) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK WebSocket audio drop rate is high
+      - alert: TMKTranslationFallbackRateHigh
+        expr: sum(rate(tmk_translation_requests_total{outcome=~"fallback|error"}[5m])) / clamp_min(sum(rate(tmk_translation_requests_total[5m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK translation fallback rate is high
+      - alert: TMKDatabaseConnectionContention
+        expr: rate(tmk_db_connection_wait_total[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK database connection pool is experiencing contention

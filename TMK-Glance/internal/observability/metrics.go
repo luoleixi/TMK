@@ -1,0 +1,106 @@
+package observability
+
+import (
+	"database/sql"
+	"net/http"
+	"strconv"
+	"sync/atomic"
+	"time"
+	"tmk-glance/internal/buildinfo"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+type Metrics struct {
+	registry             *prometheus.Registry
+	httpRequests         *prometheus.CounterVec
+	httpDuration         *prometheus.HistogramVec
+	httpInFlight         prometheus.Gauge
+	websocketConnections prometheus.Gauge
+	websocketAudio       *prometheus.CounterVec
+	translations         *prometheus.CounterVec
+	translationDuration  *prometheus.HistogramVec
+	evaluationJobs       *prometheus.CounterVec
+	evaluationDuration   *prometheus.HistogramVec
+	dbOpenConnections    prometheus.Gauge
+	dbInUseConnections   prometheus.Gauge
+	dbWaitTotal          prometheus.Counter
+	lastDBWait           atomic.Int64
+	evaluationQueued     prometheus.Gauge
+	evaluationRunning    prometheus.Gauge
+	storageBytes         prometheus.Gauge
+	storageFreeBytes     prometheus.Gauge
+	applicationReady     prometheus.Gauge
+	build                *prometheus.GaugeVec
+}
+
+func NewMetrics() *Metrics {
+	m := &Metrics{
+		registry:             prometheus.NewRegistry(),
+		httpRequests:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_http_requests_total", Help: "HTTP requests by method, normalized route and status."}, []string{"method", "route", "status"}),
+		httpDuration:         prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_http_request_duration_seconds", Help: "HTTP request duration by method and normalized route.", Buckets: prometheus.DefBuckets}, []string{"method", "route"}),
+		httpInFlight:         prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_http_requests_in_flight", Help: "HTTP requests currently being served."}),
+		websocketConnections: prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_websocket_connections", Help: "Active interpretation WebSocket connections."}),
+		websocketAudio:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_websocket_audio_chunks_total", Help: "WebSocket audio chunks by processing result."}, []string{"result"}),
+		translations:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_translation_requests_total", Help: "Translation attempts by mode and outcome."}, []string{"mode", "outcome"}),
+		translationDuration:  prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_translation_duration_seconds", Help: "Translation duration by mode and outcome.", Buckets: []float64{.05, .1, .25, .5, 1, 2, 5, 10}}, []string{"mode", "outcome"}),
+		evaluationJobs:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_evaluation_jobs_total", Help: "Evaluation jobs completed by outcome."}, []string{"outcome"}),
+		evaluationDuration:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_evaluation_item_duration_seconds", Help: "Evaluation item duration by outcome.", Buckets: []float64{1, 5, 10, 30, 60, 180, 600}}, []string{"outcome"}),
+		dbOpenConnections:    prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_db_open_connections", Help: "Open database connections."}),
+		dbInUseConnections:   prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_db_in_use_connections", Help: "Database connections currently in use."}),
+		dbWaitTotal:          prometheus.NewCounter(prometheus.CounterOpts{Name: "tmk_db_connection_wait_total", Help: "Cumulative database connection waits."}),
+		evaluationQueued:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_evaluation_jobs_queued", Help: "Evaluation jobs waiting to run."}),
+		evaluationRunning:    prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_evaluation_jobs_running", Help: "Evaluation jobs currently running."}),
+		storageBytes:         prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_object_storage_bytes", Help: "Bytes referenced by ready storage objects."}),
+		storageFreeBytes:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_object_storage_free_bytes", Help: "Free bytes on the object storage filesystem."}),
+		applicationReady:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_application_ready", Help: "Whether core application dependencies are ready (1 or 0)."}),
+		build:                prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "tmk_build_info", Help: "Build version and commit information."}, []string{"version", "commit"}),
+	}
+	m.registry.MustRegister(m.httpRequests, m.httpDuration, m.httpInFlight, m.websocketConnections,
+		m.websocketAudio, m.translations, m.translationDuration, m.evaluationJobs, m.evaluationDuration,
+		m.dbOpenConnections, m.dbInUseConnections, m.dbWaitTotal, m.evaluationQueued, m.evaluationRunning,
+		m.storageBytes, m.storageFreeBytes, m.applicationReady, m.build, prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	m.build.WithLabelValues(buildinfo.Version, buildinfo.Commit).Set(1)
+	return m
+}
+
+func (m *Metrics) Handler() http.Handler {
+	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+}
+func (m *Metrics) SetReady(ready bool) {
+	if ready {
+		m.applicationReady.Set(1)
+	} else {
+		m.applicationReady.Set(0)
+	}
+}
+func (m *Metrics) BeginHTTP() { m.httpInFlight.Inc() }
+func (m *Metrics) EndHTTP(method, route string, status int, elapsed time.Duration) {
+	m.httpInFlight.Dec()
+	m.httpRequests.WithLabelValues(method, route, strconv.Itoa(status)).Inc()
+	m.httpDuration.WithLabelValues(method, route).Observe(elapsed.Seconds())
+}
+func (m *Metrics) WebSocketOpened()         { m.websocketConnections.Inc() }
+func (m *Metrics) WebSocketClosed()         { m.websocketConnections.Dec() }
+func (m *Metrics) AudioChunk(result string) { m.websocketAudio.WithLabelValues(result).Inc() }
+func (m *Metrics) Translation(mode, outcome string, elapsed time.Duration) {
+	m.translations.WithLabelValues(mode, outcome).Inc()
+	m.translationDuration.WithLabelValues(mode, outcome).Observe(elapsed.Seconds())
+}
+func (m *Metrics) EvaluationItem(outcome string, elapsed time.Duration) {
+	m.evaluationDuration.WithLabelValues(outcome).Observe(elapsed.Seconds())
+}
+func (m *Metrics) EvaluationJob(outcome string) { m.evaluationJobs.WithLabelValues(outcome).Inc() }
+func (m *Metrics) SetRuntime(database sql.DBStats, queued, running int64, storageBytes int64, freeBytes uint64) {
+	m.dbOpenConnections.Set(float64(database.OpenConnections))
+	m.dbInUseConnections.Set(float64(database.InUse))
+	previous := m.lastDBWait.Swap(database.WaitCount)
+	if database.WaitCount > previous {
+		m.dbWaitTotal.Add(float64(database.WaitCount - previous))
+	}
+	m.evaluationQueued.Set(float64(queued))
+	m.evaluationRunning.Set(float64(running))
+	m.storageBytes.Set(float64(storageBytes))
+	m.storageFreeBytes.Set(float64(freeBytes))
+}

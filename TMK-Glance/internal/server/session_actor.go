@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"tmk-glance/internal/asr"
+	"tmk-glance/internal/observability"
 	"tmk-glance/internal/segmenter"
 	"tmk-glance/internal/store"
 	"tmk-glance/internal/translator"
@@ -46,6 +47,7 @@ type sessionActor struct {
 	audioCount       atomic.Int64
 	droppedAudioCnt  atomic.Int64
 	droppedSendCount atomic.Int64
+	metrics          *observability.Metrics
 	seq              int64
 }
 
@@ -94,8 +96,8 @@ func (p *providerStream) flush() []segmenter.Segment {
 	return []segmenter.Segment{segment}
 }
 
-func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store.SessionStore, translatorSvc translator.Translator, segmenterConfig segmenter.Config, asrFactory func(string) asr.ASR, queueBrief func(string)) *sessionActor {
-	return &sessionActor{
+func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store.SessionStore, translatorSvc translator.Translator, segmenterConfig segmenter.Config, asrFactory func(string) asr.ASR, queueBrief func(string), metrics ...*observability.Metrics) *sessionActor {
+	actor := &sessionActor{
 		conn:            conn,
 		sessionID:       sessionID,
 		store:           sessionStore,
@@ -107,6 +109,10 @@ func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store
 		sendCh:          make(chan any, sendQueueSize),
 		done:            make(chan struct{}),
 	}
+	if len(metrics) > 0 {
+		actor.metrics = metrics[0]
+	}
+	return actor
 }
 
 func (a *sessionActor) run() {
@@ -171,11 +177,17 @@ func (a *sessionActor) handleAudio(msg []byte) {
 	}
 	select {
 	case a.audioCh <- msg:
+		if a.metrics != nil {
+			a.metrics.AudioChunk("accepted")
+		}
 		count := a.audioCount.Add(1)
 		if count%50 == 1 {
 			log.Printf("[ws] received %d audio chunks, session=%s", count, a.sessionID)
 		}
 	default:
+		if a.metrics != nil {
+			a.metrics.AudioChunk("dropped")
+		}
 		count := a.droppedAudioCnt.Add(1)
 		if count%50 == 1 {
 			log.Printf("[ws] drop audio chunk, session=%s dropped=%d", a.sessionID, count)
@@ -236,7 +248,7 @@ func (a *sessionActor) startInterpret() {
 		return
 	}
 
-	a.scheduler = newTranslationScheduler(context.Background(), a.sessionID, ses.SourceLang, ses.TargetLang, a.translatorSvc, a.store, a.writeJSON)
+	a.scheduler = newTranslationScheduler(context.Background(), a.sessionID, ses.SourceLang, ses.TargetLang, a.translatorSvc, a.store, a.writeJSON, a.metrics)
 	a.scheduler.start()
 	a.pipelineDone = make(chan struct{})
 

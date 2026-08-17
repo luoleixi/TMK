@@ -21,6 +21,23 @@ concurrency:
 jobs:
   backend-test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: integration-password
+          MYSQL_DATABASE: tmk_test
+          MYSQL_USER: tmk_test
+          MYSQL_PASSWORD: integration-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -utmk_test -pintegration-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      TMK_TEST_MYSQL_DSN: tmk_test:integration-password@tcp(127.0.0.1:3306)/tmk_test?parseTime=true
     defaults:
       run:
         working-directory: TMK-Glance

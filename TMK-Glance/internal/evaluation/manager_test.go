@@ -21,6 +21,7 @@ func (deterministicASR) Recognize(ctx context.Context, audio <-chan []byte) (<-c
 		defer close(output)
 		for range audio {
 		}
+		time.Sleep(80 * time.Millisecond)
 		select {
 		case output <- asr.Result{Text: "hello world", IsFinal: true, BeginTimeMS: 0, EndTimeMS: 1000}:
 		case <-ctx.Done():
@@ -85,6 +86,8 @@ func TestManagerProcessesPersistedEvaluationJob(t *testing.T) {
 	}
 	manager := NewManager(database, objects, func(string, model.EvaluationConfig) asr.ASR { return deterministicASR{} }, Config{
 		Workers: 1, PollInterval: 5 * time.Millisecond, ItemTimeout: time.Second, MaxTextBytes: 1 << 20,
+		LeaseDuration: 30 * time.Millisecond, HeartbeatInterval: 5 * time.Millisecond,
+		ReaperInterval: 5 * time.Millisecond, RetryBase: 5 * time.Millisecond,
 	})
 	if err := manager.Start(); err != nil {
 		t.Fatal(err)
@@ -97,7 +100,7 @@ func TestManagerProcessesPersistedEvaluationJob(t *testing.T) {
 			t.Fatal(err)
 		}
 		if current.Status == model.EvaluationJobSucceeded {
-			if current.CompletedItems != 1 || current.ASRCER() != 0 || current.SegmentedCER() != 0 || current.SegmentF1() != 1 {
+			if current.CompletedItems != 1 || current.AttemptCount != 1 || current.ASRCER() != 0 || current.SegmentedCER() != 0 || current.SegmentF1() != 1 {
 				t.Fatalf("job=%+v", current)
 			}
 			results, total, err := database.ListEvaluationResults(job.ID, 10, 0)

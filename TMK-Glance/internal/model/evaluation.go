@@ -9,6 +9,7 @@ const (
 	EvaluationJobCompletedWithErrors = "completed_with_errors"
 	EvaluationJobFailed              = "failed"
 	EvaluationJobCancelled           = "cancelled"
+	EvaluationJobDeadLettered        = "dead_lettered"
 
 	EvaluationResultSucceeded = "succeeded"
 	EvaluationResultFailed    = "failed"
@@ -53,6 +54,12 @@ type EvaluationJob struct {
 	CreatedAt             time.Time        `json:"created_at"`
 	StartedAt             *time.Time       `json:"started_at,omitempty"`
 	CompletedAt           *time.Time       `json:"completed_at,omitempty"`
+	AttemptCount          int              `json:"attempt_count"`
+	MaxAttempts           int              `json:"max_attempts"`
+	NextAttemptAt         *time.Time       `json:"next_attempt_at,omitempty"`
+	LeaseOwner            string           `json:"-"`
+	LeaseExpiresAt        *time.Time       `json:"lease_expires_at,omitempty"`
+	HeartbeatAt           *time.Time       `json:"heartbeat_at,omitempty"`
 }
 
 func (j EvaluationJob) ASRCER() float64 { return metricRate(j.ASRCharDistance, j.ASRCharUnits) }

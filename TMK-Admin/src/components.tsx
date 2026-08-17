@@ -14,7 +14,7 @@ export function Metric({ label, value, detail, tone = "neutral" }: { label: stri
 
 export function Status({ value }: { value: string }) {
   const tone = ["succeeded", "ready", "active", "success", "completed"].includes(value) ? "good"
-    : ["failed", "error", "denied", "disabled"].includes(value) ? "bad"
+    : ["failed", "dead_lettered", "error", "denied", "disabled"].includes(value) ? "bad"
       : ["running", "completed_with_errors"].includes(value) ? "warn" : "neutral";
   return <span className={`status status-${tone}`}>{value.split("_").join(" ")}</span>;
 }

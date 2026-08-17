@@ -51,3 +51,10 @@ groups:
           severity: warning
         annotations:
           summary: TMK database connection pool is experiencing contention
+      - alert: TMKEvaluationTaskDeadLettered
+        expr: increase(tmk_evaluation_task_transitions_total{transition="dead_lettered"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: A TMK evaluation task entered the dead-letter state

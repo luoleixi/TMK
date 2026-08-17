@@ -91,6 +91,10 @@ func NewApplication(cfg *config.Config) (*Application, error) {
 			Workers: cfg.Evaluation.Workers, PollInterval: time.Duration(cfg.Evaluation.PollIntervalMS) * time.Millisecond,
 			ItemTimeout: time.Duration(cfg.Evaluation.ItemTimeoutSeconds) * time.Second, ChunkInterval: chunkInterval,
 			MaxTextBytes: cfg.ObjectStorage.MaxTextBytes, Metrics: app.metrics,
+			LeaseDuration:     time.Duration(cfg.Evaluation.LeaseSeconds) * time.Second,
+			HeartbeatInterval: time.Duration(cfg.Evaluation.HeartbeatSeconds) * time.Second,
+			RetryBase:         time.Duration(cfg.Evaluation.RetryBaseSeconds) * time.Second,
+			ReaperInterval:    time.Duration(cfg.Evaluation.ReaperIntervalSeconds) * time.Second,
 		})
 	if err := app.evaluations.Start(); err != nil {
 		_ = sessionStore.Close()
@@ -187,6 +191,7 @@ func (a *Application) Router() *gin.Engine {
 		admin.GET("/evaluation-jobs/:id", a.handleGetEvaluationJob)
 		admin.GET("/evaluation-jobs/:id/results", a.handleListEvaluationResults)
 		admin.POST("/evaluation-jobs/:id/cancel", a.handleCancelEvaluationJob)
+		admin.POST("/evaluation-jobs/:id/retry", a.handleRetryEvaluationJob)
 	}
 
 	return r

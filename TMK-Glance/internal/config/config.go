@@ -28,10 +28,15 @@ type Config struct {
 		MinFreeBytes      int64  `yaml:"min_free_bytes"`
 	} `yaml:"object_storage"`
 	Evaluation struct {
-		Workers            int `yaml:"workers"`
-		PollIntervalMS     int `yaml:"poll_interval_ms"`
-		ItemTimeoutSeconds int `yaml:"item_timeout_seconds"`
-		ChunkIntervalMS    int `yaml:"chunk_interval_ms"`
+		Workers               int `yaml:"workers"`
+		PollIntervalMS        int `yaml:"poll_interval_ms"`
+		ItemTimeoutSeconds    int `yaml:"item_timeout_seconds"`
+		ChunkIntervalMS       int `yaml:"chunk_interval_ms"`
+		LeaseSeconds          int `yaml:"lease_seconds"`
+		HeartbeatSeconds      int `yaml:"heartbeat_seconds"`
+		MaxAttempts           int `yaml:"max_attempts"`
+		RetryBaseSeconds      int `yaml:"retry_base_seconds"`
+		ReaperIntervalSeconds int `yaml:"reaper_interval_seconds"`
 	} `yaml:"evaluation"`
 	Governance struct {
 		SessionRetentionDays    int `yaml:"session_retention_days"`
@@ -91,6 +96,11 @@ func Load(path string) (*Config, error) {
 	cfg.Evaluation.PollIntervalMS = 500
 	cfg.Evaluation.ItemTimeoutSeconds = 600
 	cfg.Evaluation.ChunkIntervalMS = 100
+	cfg.Evaluation.LeaseSeconds = 60
+	cfg.Evaluation.HeartbeatSeconds = 15
+	cfg.Evaluation.MaxAttempts = 3
+	cfg.Evaluation.RetryBaseSeconds = 5
+	cfg.Evaluation.ReaperIntervalSeconds = 10
 	cfg.Governance.SessionRetentionDays = 180
 	cfg.Governance.EvaluationRetentionDays = 365
 	cfg.Governance.AuditRetentionDays = 365
@@ -151,6 +161,11 @@ func Load(path string) (*Config, error) {
 	applyIntEnv("EVALUATION_POLL_INTERVAL_MS", &cfg.Evaluation.PollIntervalMS)
 	applyIntEnv("EVALUATION_ITEM_TIMEOUT_SECONDS", &cfg.Evaluation.ItemTimeoutSeconds)
 	applyIntEnv("EVALUATION_CHUNK_INTERVAL_MS", &cfg.Evaluation.ChunkIntervalMS)
+	applyIntEnv("EVALUATION_LEASE_SECONDS", &cfg.Evaluation.LeaseSeconds)
+	applyIntEnv("EVALUATION_HEARTBEAT_SECONDS", &cfg.Evaluation.HeartbeatSeconds)
+	applyIntEnv("EVALUATION_MAX_ATTEMPTS", &cfg.Evaluation.MaxAttempts)
+	applyIntEnv("EVALUATION_RETRY_BASE_SECONDS", &cfg.Evaluation.RetryBaseSeconds)
+	applyIntEnv("EVALUATION_REAPER_INTERVAL_SECONDS", &cfg.Evaluation.ReaperIntervalSeconds)
 	applyIntEnv("GOVERNANCE_SESSION_RETENTION_DAYS", &cfg.Governance.SessionRetentionDays)
 	applyIntEnv("GOVERNANCE_EVALUATION_RETENTION_DAYS", &cfg.Governance.EvaluationRetentionDays)
 	applyIntEnv("GOVERNANCE_AUDIT_RETENTION_DAYS", &cfg.Governance.AuditRetentionDays)
@@ -209,6 +224,21 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Evaluation.ChunkIntervalMS < 0 || cfg.Evaluation.ChunkIntervalMS > 1000 {
 		cfg.Evaluation.ChunkIntervalMS = 100
+	}
+	if cfg.Evaluation.LeaseSeconds < 15 || cfg.Evaluation.LeaseSeconds > 3600 {
+		cfg.Evaluation.LeaseSeconds = 60
+	}
+	if cfg.Evaluation.HeartbeatSeconds < 5 || cfg.Evaluation.HeartbeatSeconds >= cfg.Evaluation.LeaseSeconds {
+		cfg.Evaluation.HeartbeatSeconds = cfg.Evaluation.LeaseSeconds / 4
+	}
+	if cfg.Evaluation.MaxAttempts < 1 || cfg.Evaluation.MaxAttempts > 10 {
+		cfg.Evaluation.MaxAttempts = 3
+	}
+	if cfg.Evaluation.RetryBaseSeconds < 1 || cfg.Evaluation.RetryBaseSeconds > 300 {
+		cfg.Evaluation.RetryBaseSeconds = 5
+	}
+	if cfg.Evaluation.ReaperIntervalSeconds < 1 || cfg.Evaluation.ReaperIntervalSeconds > 300 {
+		cfg.Evaluation.ReaperIntervalSeconds = 10
 	}
 	cfg.Governance.SessionRetentionDays = boundedDays(cfg.Governance.SessionRetentionDays, 180)
 	cfg.Governance.EvaluationRetentionDays = boundedDays(cfg.Governance.EvaluationRetentionDays, 365)

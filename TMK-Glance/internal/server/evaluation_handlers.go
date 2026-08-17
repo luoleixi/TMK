@@ -69,7 +69,7 @@ func (a *Application) handleCreateEvaluationJob(c *gin.Context) {
 	}
 	user := currentUser(c)
 	job := &model.EvaluationJob{ID: uuid.NewString(), DatasetID: strings.TrimSpace(req.DatasetID),
-		Status: model.EvaluationJobQueued, RequestedBy: user.ID, CreatedAt: time.Now().UTC(),
+		Status: model.EvaluationJobQueued, RequestedBy: user.ID, CreatedAt: time.Now().UTC(), MaxAttempts: a.cfg.Evaluation.MaxAttempts,
 		Config: model.EvaluationConfig{ASRProvider: a.cfg.ASR.Provider, SegmenterEnabled: enabled,
 			MaxSentenceSilenceMS:         a.cfg.ASR.Bailian.MaxSentenceSilenceMS,
 			SemanticPunctuationEnabled:   a.cfg.ASR.Bailian.SemanticPunctuationEnabled,
@@ -173,6 +173,33 @@ func (a *Application) handleCancelEvaluationJob(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "cancelled"})
 }
 
+func (a *Application) handleRetryEvaluationJob(c *gin.Context) {
+	job, ok, err := a.store.GetEvaluationJob(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "get evaluation job failed"})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "evaluation job not found"})
+		return
+	}
+	if job.Status != model.EvaluationJobDeadLettered && job.Status != model.EvaluationJobFailed {
+		c.JSON(http.StatusConflict, gin.H{"code": 409, "message": "only failed or dead-lettered jobs can be retried"})
+		return
+	}
+	retried, err := a.store.RetryDeadLetteredEvaluationJob(job.ID, time.Now().UTC(), a.cfg.Evaluation.MaxAttempts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "retry evaluation job failed"})
+		return
+	}
+	if !retried {
+		c.JSON(http.StatusConflict, gin.H{"code": 409, "message": "evaluation job changed while being retried"})
+		return
+	}
+	a.audit(c, currentUser(c).ID, "evaluation.job.retry", "evaluation_job", job.ID, "success", nil)
+	c.JSON(http.StatusAccepted, gin.H{"code": 0, "message": "queued"})
+}
+
 func newEvaluationJobView(job *model.EvaluationJob) evaluationJobView {
 	progress := float64(0)
 	if job.TotalItems > 0 {
@@ -198,7 +225,8 @@ func newEvaluationResultView(result *model.EvaluationResult) evaluationResultVie
 func validEvaluationStatus(value string) bool {
 	switch value {
 	case model.EvaluationJobQueued, model.EvaluationJobRunning, model.EvaluationJobSucceeded,
-		model.EvaluationJobCompletedWithErrors, model.EvaluationJobFailed, model.EvaluationJobCancelled:
+		model.EvaluationJobCompletedWithErrors, model.EvaluationJobFailed, model.EvaluationJobCancelled,
+		model.EvaluationJobDeadLettered:
 		return true
 	default:
 		return false

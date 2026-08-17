@@ -43,6 +43,7 @@ type DashboardEvaluations struct {
 	CompletedWithErrors   int64 `json:"completed_with_errors"`
 	Failed                int64 `json:"failed"`
 	Cancelled             int64 `json:"cancelled"`
+	DeadLettered          int64 `json:"dead_lettered"`
 	CompletedItems        int64 `json:"completed_items"`
 	FailedItems           int64 `json:"failed_items"`
 	ASRCharDistance       int64 `json:"-"`

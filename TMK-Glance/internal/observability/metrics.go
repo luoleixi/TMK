@@ -13,52 +13,54 @@ import (
 )
 
 type Metrics struct {
-	registry             *prometheus.Registry
-	httpRequests         *prometheus.CounterVec
-	httpDuration         *prometheus.HistogramVec
-	httpInFlight         prometheus.Gauge
-	websocketConnections prometheus.Gauge
-	websocketAudio       *prometheus.CounterVec
-	translations         *prometheus.CounterVec
-	translationDuration  *prometheus.HistogramVec
-	evaluationJobs       *prometheus.CounterVec
-	evaluationDuration   *prometheus.HistogramVec
-	dbOpenConnections    prometheus.Gauge
-	dbInUseConnections   prometheus.Gauge
-	dbWaitTotal          prometheus.Counter
-	lastDBWait           atomic.Int64
-	evaluationQueued     prometheus.Gauge
-	evaluationRunning    prometheus.Gauge
-	storageBytes         prometheus.Gauge
-	storageFreeBytes     prometheus.Gauge
-	applicationReady     prometheus.Gauge
-	build                *prometheus.GaugeVec
+	registry              *prometheus.Registry
+	httpRequests          *prometheus.CounterVec
+	httpDuration          *prometheus.HistogramVec
+	httpInFlight          prometheus.Gauge
+	websocketConnections  prometheus.Gauge
+	websocketAudio        *prometheus.CounterVec
+	translations          *prometheus.CounterVec
+	translationDuration   *prometheus.HistogramVec
+	evaluationJobs        *prometheus.CounterVec
+	evaluationDuration    *prometheus.HistogramVec
+	evaluationTransitions *prometheus.CounterVec
+	dbOpenConnections     prometheus.Gauge
+	dbInUseConnections    prometheus.Gauge
+	dbWaitTotal           prometheus.Counter
+	lastDBWait            atomic.Int64
+	evaluationQueued      prometheus.Gauge
+	evaluationRunning     prometheus.Gauge
+	storageBytes          prometheus.Gauge
+	storageFreeBytes      prometheus.Gauge
+	applicationReady      prometheus.Gauge
+	build                 *prometheus.GaugeVec
 }
 
 func NewMetrics() *Metrics {
 	m := &Metrics{
-		registry:             prometheus.NewRegistry(),
-		httpRequests:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_http_requests_total", Help: "HTTP requests by method, normalized route and status."}, []string{"method", "route", "status"}),
-		httpDuration:         prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_http_request_duration_seconds", Help: "HTTP request duration by method and normalized route.", Buckets: prometheus.DefBuckets}, []string{"method", "route"}),
-		httpInFlight:         prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_http_requests_in_flight", Help: "HTTP requests currently being served."}),
-		websocketConnections: prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_websocket_connections", Help: "Active interpretation WebSocket connections."}),
-		websocketAudio:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_websocket_audio_chunks_total", Help: "WebSocket audio chunks by processing result."}, []string{"result"}),
-		translations:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_translation_requests_total", Help: "Translation attempts by mode and outcome."}, []string{"mode", "outcome"}),
-		translationDuration:  prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_translation_duration_seconds", Help: "Translation duration by mode and outcome.", Buckets: []float64{.05, .1, .25, .5, 1, 2, 5, 10}}, []string{"mode", "outcome"}),
-		evaluationJobs:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_evaluation_jobs_total", Help: "Evaluation jobs completed by outcome."}, []string{"outcome"}),
-		evaluationDuration:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_evaluation_item_duration_seconds", Help: "Evaluation item duration by outcome.", Buckets: []float64{1, 5, 10, 30, 60, 180, 600}}, []string{"outcome"}),
-		dbOpenConnections:    prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_db_open_connections", Help: "Open database connections."}),
-		dbInUseConnections:   prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_db_in_use_connections", Help: "Database connections currently in use."}),
-		dbWaitTotal:          prometheus.NewCounter(prometheus.CounterOpts{Name: "tmk_db_connection_wait_total", Help: "Cumulative database connection waits."}),
-		evaluationQueued:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_evaluation_jobs_queued", Help: "Evaluation jobs waiting to run."}),
-		evaluationRunning:    prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_evaluation_jobs_running", Help: "Evaluation jobs currently running."}),
-		storageBytes:         prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_object_storage_bytes", Help: "Bytes referenced by ready storage objects."}),
-		storageFreeBytes:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_object_storage_free_bytes", Help: "Free bytes on the object storage filesystem."}),
-		applicationReady:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_application_ready", Help: "Whether core application dependencies are ready (1 or 0)."}),
-		build:                prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "tmk_build_info", Help: "Build version and commit information."}, []string{"version", "commit"}),
+		registry:              prometheus.NewRegistry(),
+		httpRequests:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_http_requests_total", Help: "HTTP requests by method, normalized route and status."}, []string{"method", "route", "status"}),
+		httpDuration:          prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_http_request_duration_seconds", Help: "HTTP request duration by method and normalized route.", Buckets: prometheus.DefBuckets}, []string{"method", "route"}),
+		httpInFlight:          prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_http_requests_in_flight", Help: "HTTP requests currently being served."}),
+		websocketConnections:  prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_websocket_connections", Help: "Active interpretation WebSocket connections."}),
+		websocketAudio:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_websocket_audio_chunks_total", Help: "WebSocket audio chunks by processing result."}, []string{"result"}),
+		translations:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_translation_requests_total", Help: "Translation attempts by mode and outcome."}, []string{"mode", "outcome"}),
+		translationDuration:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_translation_duration_seconds", Help: "Translation duration by mode and outcome.", Buckets: []float64{.05, .1, .25, .5, 1, 2, 5, 10}}, []string{"mode", "outcome"}),
+		evaluationJobs:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_evaluation_jobs_total", Help: "Evaluation jobs completed by outcome."}, []string{"outcome"}),
+		evaluationDuration:    prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_evaluation_item_duration_seconds", Help: "Evaluation item duration by outcome.", Buckets: []float64{1, 5, 10, 30, 60, 180, 600}}, []string{"outcome"}),
+		evaluationTransitions: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_evaluation_task_transitions_total", Help: "Reliable evaluation task transitions."}, []string{"transition"}),
+		dbOpenConnections:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_db_open_connections", Help: "Open database connections."}),
+		dbInUseConnections:    prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_db_in_use_connections", Help: "Database connections currently in use."}),
+		dbWaitTotal:           prometheus.NewCounter(prometheus.CounterOpts{Name: "tmk_db_connection_wait_total", Help: "Cumulative database connection waits."}),
+		evaluationQueued:      prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_evaluation_jobs_queued", Help: "Evaluation jobs waiting to run."}),
+		evaluationRunning:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_evaluation_jobs_running", Help: "Evaluation jobs currently running."}),
+		storageBytes:          prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_object_storage_bytes", Help: "Bytes referenced by ready storage objects."}),
+		storageFreeBytes:      prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_object_storage_free_bytes", Help: "Free bytes on the object storage filesystem."}),
+		applicationReady:      prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_application_ready", Help: "Whether core application dependencies are ready (1 or 0)."}),
+		build:                 prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "tmk_build_info", Help: "Build version and commit information."}, []string{"version", "commit"}),
 	}
 	m.registry.MustRegister(m.httpRequests, m.httpDuration, m.httpInFlight, m.websocketConnections,
-		m.websocketAudio, m.translations, m.translationDuration, m.evaluationJobs, m.evaluationDuration,
+		m.websocketAudio, m.translations, m.translationDuration, m.evaluationJobs, m.evaluationDuration, m.evaluationTransitions,
 		m.dbOpenConnections, m.dbInUseConnections, m.dbWaitTotal, m.evaluationQueued, m.evaluationRunning,
 		m.storageBytes, m.storageFreeBytes, m.applicationReady, m.build, prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	m.build.WithLabelValues(buildinfo.Version, buildinfo.Commit).Set(1)
@@ -92,6 +94,11 @@ func (m *Metrics) EvaluationItem(outcome string, elapsed time.Duration) {
 	m.evaluationDuration.WithLabelValues(outcome).Observe(elapsed.Seconds())
 }
 func (m *Metrics) EvaluationJob(outcome string) { m.evaluationJobs.WithLabelValues(outcome).Inc() }
+func (m *Metrics) EvaluationTransition(transition string, count int) {
+	if count > 0 {
+		m.evaluationTransitions.WithLabelValues(transition).Add(float64(count))
+	}
+}
 func (m *Metrics) SetRuntime(database sql.DBStats, queued, running int64, storageBytes int64, freeBytes uint64) {
 	m.dbOpenConnections.Set(float64(database.OpenConnections))
 	m.dbInUseConnections.Set(float64(database.InUse))

@@ -42,6 +42,11 @@ translator:
 	t.Setenv("OBJECT_STORAGE_TOTAL_QUOTA_BYTES", "987654")
 	t.Setenv("EVALUATION_WORKERS", "3")
 	t.Setenv("EVALUATION_ITEM_TIMEOUT_SECONDS", "120")
+	t.Setenv("EVALUATION_LEASE_SECONDS", "90")
+	t.Setenv("EVALUATION_HEARTBEAT_SECONDS", "20")
+	t.Setenv("EVALUATION_MAX_ATTEMPTS", "5")
+	t.Setenv("EVALUATION_RETRY_BASE_SECONDS", "7")
+	t.Setenv("EVALUATION_REAPER_INTERVAL_SECONDS", "12")
 	t.Setenv("GOVERNANCE_SESSION_RETENTION_DAYS", "90")
 	t.Setenv("GOVERNANCE_STUCK_JOB_MINUTES", "45")
 
@@ -73,7 +78,9 @@ translator:
 	if cfg.ObjectStorage.Driver != "local" || cfg.ObjectStorage.Root != "/srv/tmk/objects" || cfg.ObjectStorage.MaxAudioBytes != 123456 || cfg.ObjectStorage.TotalQuotaBytes != 987654 {
 		t.Fatalf("object storage overrides not applied: %+v", cfg.ObjectStorage)
 	}
-	if cfg.Evaluation.Workers != 3 || cfg.Evaluation.ItemTimeoutSeconds != 120 {
+	if cfg.Evaluation.Workers != 3 || cfg.Evaluation.ItemTimeoutSeconds != 120 || cfg.Evaluation.LeaseSeconds != 90 ||
+		cfg.Evaluation.HeartbeatSeconds != 20 || cfg.Evaluation.MaxAttempts != 5 ||
+		cfg.Evaluation.RetryBaseSeconds != 7 || cfg.Evaluation.ReaperIntervalSeconds != 12 {
 		t.Fatalf("evaluation overrides not applied: %+v", cfg.Evaluation)
 	}
 	if cfg.Governance.SessionRetentionDays != 90 || cfg.Governance.StuckJobMinutes != 45 || cfg.Governance.AuditRetentionDays != 365 {

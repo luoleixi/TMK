@@ -115,19 +115,26 @@ func TestMySQLMigrationsAndCoreLifecycle(t *testing.T) {
 	if err := database.CreateEvaluationJob(job); err != nil {
 		t.Fatalf("create evaluation job: %v", err)
 	}
-	claimed, ok, err := database.ClaimNextEvaluationJob()
-	if err != nil || !ok || claimed.ID != job.ID || claimed.TotalItems != 1 {
+	workerID := "mysql-worker"
+	claimed, ok, err := database.ClaimNextEvaluationJob(workerID, now, time.Minute)
+	if err != nil || !ok || claimed.ID != job.ID || claimed.TotalItems != 1 || claimed.AttemptCount != 1 || claimed.MaxAttempts != 3 {
 		t.Fatalf("claim evaluation job: job=%+v ok=%v err=%v", claimed, ok, err)
+	}
+	if renewed, err := database.HeartbeatEvaluationJob(job.ID, workerID, now.Add(500*time.Millisecond), time.Minute); err != nil || !renewed {
+		t.Fatalf("heartbeat renewed=%v err=%v", renewed, err)
 	}
 	result := &model.EvaluationResult{ID: "mysql-result", JobID: job.ID, DatasetItemID: item.ID, Sequence: 1,
 		Status: model.EvaluationResultSucceeded, ReferenceText: "你好", ASRText: "你号", SegmentedText: "你好",
 		SegmentsJSON: `[{"text":"你好"}]`, SegmentCount: 1, ASRCharDistance: 1, ASRCharUnits: 2,
 		SegmentedCharUnits: 2, ASRWordDistance: 1, ASRWordUnits: 1, SegmentedWordUnits: 1,
 		SegmentMatched: 1, SegmentPredicted: 1, SegmentReference: 1, StartedAt: now, CompletedAt: now.Add(time.Second)}
-	if err := database.SaveEvaluationResult(result); err != nil {
+	if err := database.SaveEvaluationResult(result, workerID, now.Add(time.Second)); err != nil {
 		t.Fatalf("save evaluation result: %v", err)
 	}
-	if finished, err := database.FinishEvaluationJob(job.ID, false, ""); err != nil || !finished {
+	if err := database.SaveEvaluationResult(result, workerID, now.Add(1500*time.Millisecond)); err != nil {
+		t.Fatalf("idempotent evaluation result: %v", err)
+	}
+	if finished, err := database.FinishEvaluationJob(job.ID, workerID, false, "", now.Add(2*time.Second)); err != nil || !finished {
 		t.Fatalf("finish evaluation job: finished=%v err=%v", finished, err)
 	}
 	storedJob, ok, err := database.GetEvaluationJob(job.ID)

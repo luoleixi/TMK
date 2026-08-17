@@ -22,6 +22,11 @@ evaluation:
   poll_interval_ms: 500
   item_timeout_seconds: 600
   chunk_interval_ms: 100
+  lease_seconds: 60
+  heartbeat_seconds: 15
+  max_attempts: 3
+  retry_base_seconds: 5
+  reaper_interval_seconds: 10
 
 governance:
   session_retention_days: 180

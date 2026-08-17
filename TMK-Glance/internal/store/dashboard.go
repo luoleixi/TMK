@@ -56,6 +56,7 @@ func (s *SessionStore) DashboardSnapshot(windowDays int, now time.Time) (*model.
 		COALESCE(SUM(CASE WHEN status='completed_with_errors' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN status='dead_lettered' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(completed_items),0), COALESCE(SUM(failed_items),0),
 		COALESCE(SUM(asr_char_distance),0), COALESCE(SUM(asr_char_units),0),
 		COALESCE(SUM(segmented_char_distance),0), COALESCE(SUM(segmented_char_units),0),
@@ -65,6 +66,7 @@ func (s *SessionStore) DashboardSnapshot(windowDays int, now time.Time) (*model.
 		FROM evaluation_jobs`, formatTime(since)).Scan(&snapshot.Evaluations.Total, &snapshot.Evaluations.InWindow,
 		&snapshot.Evaluations.Queued, &snapshot.Evaluations.Running, &snapshot.Evaluations.Succeeded,
 		&snapshot.Evaluations.CompletedWithErrors, &snapshot.Evaluations.Failed, &snapshot.Evaluations.Cancelled,
+		&snapshot.Evaluations.DeadLettered,
 		&snapshot.Evaluations.CompletedItems, &snapshot.Evaluations.FailedItems,
 		&snapshot.Evaluations.ASRCharDistance, &snapshot.Evaluations.ASRCharUnits,
 		&snapshot.Evaluations.SegmentedCharDistance, &snapshot.Evaluations.SegmentedCharUnits,
@@ -154,7 +156,7 @@ func (s *SessionStore) GovernanceReport(now time.Time, sessionDays, evaluationDa
 		{`SELECT COUNT(*) FROM auth_tokens WHERE revoked_at IS NULL AND expires_at<?`, []any{nowText}, &report.ExpiredActiveTokens},
 		{`SELECT COUNT(*) FROM auth_tokens WHERE revoked_at IS NOT NULL OR expires_at<?`, []any{nowText}, &report.RevokedOrExpiredTokens},
 		{`SELECT COUNT(*) FROM sessions WHERE status IN ('completed','error') AND created_at<?`, []any{sessionCutoff}, &report.SessionsPastRetention},
-		{`SELECT COUNT(*) FROM evaluation_jobs WHERE status IN ('succeeded','completed_with_errors','failed','cancelled') AND created_at<?`, []any{evaluationCutoff}, &report.EvaluationJobsPastRetention},
+		{`SELECT COUNT(*) FROM evaluation_jobs WHERE status IN ('succeeded','completed_with_errors','failed','cancelled','dead_lettered') AND created_at<?`, []any{evaluationCutoff}, &report.EvaluationJobsPastRetention},
 		{`SELECT COUNT(*) FROM audit_logs WHERE created_at<?`, []any{auditCutoff}, &report.AuditEventsPastRetention},
 	}
 	for _, item := range queries {

@@ -75,6 +75,10 @@ export type EvaluationJob = {
   segment_count_delta: number;
   error_message?: string;
   created_at: string;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at?: string;
+  lease_expires_at?: string;
 };
 
 export type EvaluationResult = {
@@ -110,7 +114,7 @@ export type Dashboard = {
   sessions: { total: number; in_window: number; ready: number; active: number; completed: number; failed: number; records: number };
   storage: { objects: number; audio_files: number; text_files: number; bytes: number; disk_free_bytes: number; quota_bytes: number; reserve_bytes: number };
   datasets: { total: number; draft: number; ready: number; archived: number; items: number };
-  evaluations: EvaluationJob & { total: number; in_window: number; queued: number; running: number; completed_with_errors: number; cancelled: number };
+  evaluations: EvaluationJob & { total: number; in_window: number; queued: number; running: number; completed_with_errors: number; cancelled: number; dead_lettered: number };
   daily: DailyPoint[];
   recent_evaluation_jobs: EvaluationJob[];
 };

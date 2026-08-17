@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -51,7 +51,7 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 	if err != nil {
 		return nil, fmt.Errorf("ws dial: %w", err)
 	}
-	log.Printf("[asr:bailian] connected")
+	slog.Debug("asr provider connected", "provider", "bailian")
 
 	b.mu.Lock()
 	b.conn = conn
@@ -70,7 +70,7 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 		conn.Close()
 		return nil, err
 	}
-	log.Printf("[asr:bailian] task started: %s", taskID)
+	slog.Debug("asr provider task started", "provider", "bailian", "provider_task_id", taskID)
 
 	out := make(chan Result, 32)
 	go func() {
@@ -93,10 +93,10 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 				}
 				bcnt++
 				if bcnt%50 == 1 {
-					log.Printf("[asr:bailian] sent %d audio chunks to Bailian", bcnt)
+					slog.Debug("asr audio chunks sent", "provider", "bailian", "chunks", bcnt)
 				}
 				if err := b.writeMessage(conn, websocket.BinaryMessage, data); err != nil {
-					log.Printf("[asr:bailian] write audio error: %v", err)
+					slog.Warn("asr audio write failed", "provider", "bailian", "error", err)
 					return
 				}
 			}
@@ -113,13 +113,14 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 			}
 			b.mu.Unlock()
 			_ = conn.Close()
-			log.Printf("[asr:bailian] stopped")
+			slog.Debug("asr provider stopped", "provider", "bailian", "provider_task_id", taskID)
 		}()
 		for {
 			_, raw, err := conn.ReadMessage()
 			if err != nil {
 				if ctx.Err() == nil {
-					log.Printf("[asr:bailian] read: %v", err)
+					slog.Warn("asr provider read failed", "provider", "bailian", "error", err)
+					sendASRError(ctx, out, fmt.Errorf("read result: %w", err))
 				}
 				return
 			}
@@ -149,7 +150,6 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 				text := event.Payload.Output.Sentence.Text
 				isFinal := event.Payload.Output.Sentence.SentenceEnd
 				if text != "" {
-					log.Printf("[asr:bailian] result: %q (final=%v)", text, isFinal)
 					result := Result{
 						Text:        text,
 						IsFinal:     isFinal,
@@ -165,13 +165,16 @@ func (b *bailianASR) Recognize(ctx context.Context, audioCh <-chan []byte) (<-ch
 					}
 				}
 			case "task-finished":
-				log.Printf("[asr:bailian] task finished")
+				slog.Debug("asr provider task finished", "provider", "bailian", "provider_task_id", taskID)
 				return
 			case "task-failed":
-				log.Printf("[asr:bailian] task failed: %s %s", event.Header.ErrorCode, event.Header.ErrorMessage)
+				err := fmt.Errorf("provider task failed: %s %s", event.Header.ErrorCode, event.Header.ErrorMessage)
+				slog.Warn("asr provider task failed", "provider", "bailian", "provider_task_id", taskID,
+					"error_code", event.Header.ErrorCode, "error", event.Header.ErrorMessage)
+				sendASRError(ctx, out, err)
 				return
 			default:
-				log.Printf("[asr:bailian] unexpected event: %s (raw: %s)", event.Header.Event, string(raw))
+				slog.Debug("asr provider unexpected event", "provider", "bailian", "event", event.Header.Event)
 			}
 		}
 	}()
@@ -227,8 +230,15 @@ func (b *bailianASR) sendFinishTask(taskID string) {
 
 	if conn != nil {
 		if err := b.writeJSON(conn, msg); err != nil {
-			log.Printf("[asr:bailian] finish-task write error: %v", err)
+			slog.Warn("asr finish task write failed", "provider", "bailian", "error", err)
 		}
+	}
+}
+
+func sendASRError(ctx context.Context, out chan<- Result, err error) {
+	select {
+	case out <- Result{Error: err.Error()}:
+	case <-ctx.Done():
 	}
 }
 

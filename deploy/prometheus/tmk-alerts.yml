@@ -44,6 +44,27 @@ groups:
           severity: warning
         annotations:
           summary: TMK translation fallback rate is high
+      - alert: TMKASRFailureRateHigh
+        expr: (sum(rate(tmk_asr_requests_total{outcome="error"}[10m])) / clamp_min(sum(rate(tmk_asr_requests_total{outcome=~"success|error"}[10m])), 0.001)) > 0.05 and sum(increase(tmk_asr_requests_total{outcome=~"success|error"}[10m])) >= 5
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK ASR failure rate is high
+      - alert: TMKTranslationLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(tmk_translation_duration_seconds{outcome=~"success|fallback|error"}[10m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK translation p95 latency is high
+      - alert: TMKEvaluationTaskExecutionSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(tmk_evaluation_task_execution_duration_seconds[15m]))) > 900
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK evaluation task execution p95 is high
       - alert: TMKDatabaseConnectionContention
         expr: rate(tmk_db_connection_wait_total[5m]) > 1
         for: 10m

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -88,6 +89,8 @@ func (a *Application) handleCreateEvaluationJob(c *gin.Context) {
 		}
 		return
 	}
+	slog.InfoContext(c.Request.Context(), "evaluation task queued", "component", "evaluation", "job_id", job.ID,
+		"dataset_id", job.DatasetID, "total_items", job.TotalItems, "max_attempts", job.MaxAttempts)
 	a.audit(c, user.ID, "evaluation.job.create", "evaluation_job", job.ID, "success", gin.H{"dataset_id": job.DatasetID, "revision": job.DatasetRevision})
 	c.JSON(http.StatusAccepted, gin.H{"code": 0, "message": "queued", "data": newEvaluationJobView(job)})
 }

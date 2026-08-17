@@ -7,6 +7,7 @@ type Result struct {
 	IsFinal     bool   `json:"is_final"`
 	BeginTimeMS int64  `json:"begin_time_ms,omitempty"`
 	EndTimeMS   int64  `json:"end_time_ms,omitempty"`
+	Error       string `json:"-"`
 }
 
 type ASR interface {

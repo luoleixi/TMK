@@ -19,10 +19,14 @@ type Metrics struct {
 	httpInFlight          prometheus.Gauge
 	websocketConnections  prometheus.Gauge
 	websocketAudio        *prometheus.CounterVec
+	asrRequests           *prometheus.CounterVec
+	asrDuration           *prometheus.HistogramVec
 	translations          *prometheus.CounterVec
 	translationDuration   *prometheus.HistogramVec
 	evaluationJobs        *prometheus.CounterVec
 	evaluationDuration    *prometheus.HistogramVec
+	evaluationJobDuration *prometheus.HistogramVec
+	evaluationQueueWait   prometheus.Histogram
 	evaluationTransitions *prometheus.CounterVec
 	dbOpenConnections     prometheus.Gauge
 	dbInUseConnections    prometheus.Gauge
@@ -44,10 +48,14 @@ func NewMetrics() *Metrics {
 		httpInFlight:          prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_http_requests_in_flight", Help: "HTTP requests currently being served."}),
 		websocketConnections:  prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_websocket_connections", Help: "Active interpretation WebSocket connections."}),
 		websocketAudio:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_websocket_audio_chunks_total", Help: "WebSocket audio chunks by processing result."}, []string{"result"}),
+		asrRequests:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_asr_requests_total", Help: "ASR stream attempts by mode and outcome."}, []string{"mode", "outcome"}),
+		asrDuration:           prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_asr_request_duration_seconds", Help: "ASR stream duration by mode and outcome.", Buckets: []float64{.1, .5, 1, 2, 5, 10, 30, 60, 180, 600}}, []string{"mode", "outcome"}),
 		translations:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_translation_requests_total", Help: "Translation attempts by mode and outcome."}, []string{"mode", "outcome"}),
 		translationDuration:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_translation_duration_seconds", Help: "Translation duration by mode and outcome.", Buckets: []float64{.05, .1, .25, .5, 1, 2, 5, 10}}, []string{"mode", "outcome"}),
 		evaluationJobs:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_evaluation_jobs_total", Help: "Evaluation jobs completed by outcome."}, []string{"outcome"}),
 		evaluationDuration:    prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_evaluation_item_duration_seconds", Help: "Evaluation item duration by outcome.", Buckets: []float64{1, 5, 10, 30, 60, 180, 600}}, []string{"outcome"}),
+		evaluationJobDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "tmk_evaluation_task_execution_duration_seconds", Help: "Evaluation task attempt execution duration by outcome.", Buckets: []float64{1, 5, 10, 30, 60, 180, 600, 1800, 3600}}, []string{"outcome"}),
+		evaluationQueueWait:   prometheus.NewHistogram(prometheus.HistogramOpts{Name: "tmk_evaluation_task_queue_wait_seconds", Help: "Time evaluation tasks wait before an execution attempt.", Buckets: []float64{.1, .5, 1, 5, 10, 30, 60, 300, 900, 3600}}),
 		evaluationTransitions: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tmk_evaluation_task_transitions_total", Help: "Reliable evaluation task transitions."}, []string{"transition"}),
 		dbOpenConnections:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_db_open_connections", Help: "Open database connections."}),
 		dbInUseConnections:    prometheus.NewGauge(prometheus.GaugeOpts{Name: "tmk_db_in_use_connections", Help: "Database connections currently in use."}),
@@ -60,7 +68,8 @@ func NewMetrics() *Metrics {
 		build:                 prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "tmk_build_info", Help: "Build version and commit information."}, []string{"version", "commit"}),
 	}
 	m.registry.MustRegister(m.httpRequests, m.httpDuration, m.httpInFlight, m.websocketConnections,
-		m.websocketAudio, m.translations, m.translationDuration, m.evaluationJobs, m.evaluationDuration, m.evaluationTransitions,
+		m.websocketAudio, m.asrRequests, m.asrDuration, m.translations, m.translationDuration,
+		m.evaluationJobs, m.evaluationDuration, m.evaluationJobDuration, m.evaluationQueueWait, m.evaluationTransitions,
 		m.dbOpenConnections, m.dbInUseConnections, m.dbWaitTotal, m.evaluationQueued, m.evaluationRunning,
 		m.storageBytes, m.storageFreeBytes, m.applicationReady, m.build, prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	m.build.WithLabelValues(buildinfo.Version, buildinfo.Commit).Set(1)
@@ -86,6 +95,10 @@ func (m *Metrics) EndHTTP(method, route string, status int, elapsed time.Duratio
 func (m *Metrics) WebSocketOpened()         { m.websocketConnections.Inc() }
 func (m *Metrics) WebSocketClosed()         { m.websocketConnections.Dec() }
 func (m *Metrics) AudioChunk(result string) { m.websocketAudio.WithLabelValues(result).Inc() }
+func (m *Metrics) ASR(mode, outcome string, elapsed time.Duration) {
+	m.asrRequests.WithLabelValues(mode, outcome).Inc()
+	m.asrDuration.WithLabelValues(mode, outcome).Observe(elapsed.Seconds())
+}
 func (m *Metrics) Translation(mode, outcome string, elapsed time.Duration) {
 	m.translations.WithLabelValues(mode, outcome).Inc()
 	m.translationDuration.WithLabelValues(mode, outcome).Observe(elapsed.Seconds())
@@ -93,7 +106,15 @@ func (m *Metrics) Translation(mode, outcome string, elapsed time.Duration) {
 func (m *Metrics) EvaluationItem(outcome string, elapsed time.Duration) {
 	m.evaluationDuration.WithLabelValues(outcome).Observe(elapsed.Seconds())
 }
-func (m *Metrics) EvaluationJob(outcome string) { m.evaluationJobs.WithLabelValues(outcome).Inc() }
+func (m *Metrics) EvaluationJob(outcome string, elapsed time.Duration) {
+	m.evaluationJobs.WithLabelValues(outcome).Inc()
+	m.evaluationJobDuration.WithLabelValues(outcome).Observe(elapsed.Seconds())
+}
+func (m *Metrics) EvaluationQueueWait(elapsed time.Duration) {
+	if elapsed > 0 {
+		m.evaluationQueueWait.Observe(elapsed.Seconds())
+	}
+}
 func (m *Metrics) EvaluationTransition(transition string, count int) {
 	if count > 0 {
 		m.evaluationTransitions.WithLabelValues(transition).Add(float64(count))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"time"
 
 	"tmk-glance/internal/model"
@@ -205,7 +206,8 @@ func (s *translationScheduler) translate(job translationJob) {
 		if errors.Is(err, context.Canceled) && s.ctx.Err() != nil {
 			return
 		}
-		log.Printf("[translate] fallback to source text, session=%s seq=%d final=%v err=%v", s.sessionID, job.Seq, job.IsFinal, err)
+		slog.Warn("translation request failed; falling back to source", "component", "translation", "session_id", s.sessionID,
+			"seq", job.Seq, "final", job.IsFinal, "outcome", "fallback", "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		translated = job.Text
 	}
 	if s.metrics != nil {
@@ -214,6 +216,10 @@ func (s *translationScheduler) translate(job translationJob) {
 			outcome = "fallback"
 		}
 		s.metrics.Translation(mode, outcome, time.Since(started))
+	}
+	if err == nil {
+		slog.Debug("translation request completed", "component", "translation", "session_id", s.sessionID,
+			"seq", job.Seq, "mode", mode, "outcome", "success", "duration_ms", time.Since(started).Milliseconds())
 	}
 
 	if s.ctx.Err() != nil {

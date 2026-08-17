@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -172,6 +173,10 @@ func (m *Manager) reaper() {
 }
 
 func (m *Manager) runJob(job *model.EvaluationJob, workerID string) {
+	started := time.Now()
+	if wait := started.Sub(job.CreatedAt); wait > 0 && m.config.Metrics != nil {
+		m.config.Metrics.EvaluationQueueWait(wait)
+	}
 	outcome := model.EvaluationJobFailed
 	if job.FailedItems > 0 {
 		outcome = model.EvaluationJobCompletedWithErrors
@@ -182,9 +187,18 @@ func (m *Manager) runJob(job *model.EvaluationJob, workerID string) {
 			log.Printf("[evaluation] recovered worker panic job=%s: %v", job.ID, recovered)
 		}
 		if m.config.Metrics != nil {
-			m.config.Metrics.EvaluationJob(string(outcome))
+			m.config.Metrics.EvaluationJob(string(outcome), time.Since(started))
+		}
+		attrs := []any{"component", "evaluation", "job_id", job.ID, "dataset_id", job.DatasetID,
+			"worker_id", workerID, "attempt", job.AttemptCount, "outcome", outcome, "duration_ms", time.Since(started).Milliseconds()}
+		if outcome == model.EvaluationJobSucceeded || outcome == model.EvaluationJobCompletedWithErrors {
+			slog.Info("evaluation task attempt completed", attrs...)
+		} else {
+			slog.Warn("evaluation task attempt ended", attrs...)
 		}
 	}()
+	slog.Info("evaluation task attempt started", "component", "evaluation", "job_id", job.ID,
+		"dataset_id", job.DatasetID, "worker_id", workerID, "attempt", job.AttemptCount)
 	ctx, cancel := context.WithCancelCause(m.ctx)
 	m.activeMu.Lock()
 	m.activeJobs[job.ID] = cancel
@@ -377,6 +391,21 @@ func (m *Manager) processItem(ctx context.Context, job *model.EvaluationJob, ite
 	}
 	defer audioFile.Close()
 	engine := m.asrFactory(job.DatasetLanguage, job.Config)
+	asrStarted := time.Now()
+	asrOutcome := "error"
+	asrRecorded := false
+	recordASR := func() {
+		if asrRecorded {
+			return
+		}
+		asrRecorded = true
+		if m.config.Metrics != nil {
+			m.config.Metrics.ASR("evaluation", asrOutcome, time.Since(asrStarted))
+		}
+		slog.Debug("asr evaluation request completed", "component", "evaluation", "mode", "evaluation",
+			"outcome", asrOutcome, "duration_ms", time.Since(asrStarted).Milliseconds())
+	}
+	defer recordASR()
 	if engine == nil {
 		return errors.New("ASR engine is unavailable")
 	}
@@ -402,13 +431,24 @@ func (m *Manager) processItem(ctx context.Context, job *model.EvaluationJob, ite
 	for {
 		select {
 		case <-ctx.Done():
+			asrOutcome = "cancelled"
+			recordASR()
 			stopFeed()
 			<-feedErr
 			return ctx.Err()
 		case recognized, ok := <-resultCh:
 			if !ok {
+				asrOutcome = "success"
+				recordASR()
 				stopFeed()
 				goto complete
+			}
+			if recognized.Error != "" {
+				asrOutcome = "error"
+				recordASR()
+				stopFeed()
+				<-feedErr
+				return errors.New(recognized.Error)
 			}
 			lastPartial = recognized.Text
 			if recognized.IsFinal {
@@ -441,6 +481,8 @@ complete:
 	}
 	result.ASRText = joinTranscript(finalASR)
 	if strings.TrimSpace(result.ASRText) == "" {
+		asrOutcome = "error"
+		recordASR()
 		return errors.New("ASR returned no transcript")
 	}
 	segmentTexts := make([]string, 0, len(segments))

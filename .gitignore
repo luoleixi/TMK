@@ -13,6 +13,7 @@ docs/*
 !docs/异步评测任务设计.md
 !docs/仪表盘与生产数据治理设计.md
 !docs/TMK-Admin设计与部署.md
+!docs/健康检测设计.md
 CLAUDE.md
 
 # Build output

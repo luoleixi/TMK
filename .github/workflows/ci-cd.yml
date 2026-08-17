@@ -141,4 +141,4 @@ jobs:
           remote_artifact="/var/lib/tmk-deploy/test/tmk-glance-${RELEASE_ID}.gz"
           scp dist/tmk-glance.gz "${USER}@${HOST}:${remote_artifact}"
           ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-test "${remote_artifact}" "${checksum}" "${RELEASE_ID}"
-          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/api/health"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/api/health/ready"

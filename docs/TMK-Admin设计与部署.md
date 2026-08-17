@@ -53,7 +53,7 @@ Vite 在两个环境分别写入资源基准路径。浏览器根据当前 `/adm
 1. 后端竞态测试、Windows 客户端测试和 TMK-Admin 类型检查并行运行。
 2. Admin 以 `/tmk-test/admin/` 构建，并作为独立工件传给服务端构建任务。
 3. 服务端用 `adminui` 标签生成单一 Linux 二进制。
-4. 受限部署账号上传并原子切换测试版本，最后检查 `/tmk-test/api/health`。
+4. 受限部署账号上传并原子切换测试版本，最后检查 `/tmk-test/api/health/ready`；只有返回 HTTP 200 才认为版本已就绪。
 
 生产工作流只能人工触发，并要求版本号和 `DEPLOY_PRODUCTION` 二次确认。它会以 `/tmk-production/admin/` 重新构建后台，等待 `production` Environment 的人工审批，部署并通过健康检查后才构建 Windows 正式客户端。流水线不会复制测试数据库、对象文件或密钥到生产环境。
 

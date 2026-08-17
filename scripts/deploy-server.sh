@@ -97,7 +97,7 @@ systemctl restart "${service}"
 
 healthy=false
 for _ in $(seq 1 30); do
-  if curl --fail --silent --max-time 2 "http://127.0.0.1:${health_port}/api/health" >/dev/null; then
+  if curl --fail --silent --max-time 2 "http://127.0.0.1:${health_port}/api/health/ready" >/dev/null; then
     healthy=true
     break
   fi
@@ -106,6 +106,8 @@ done
 
 if [[ ${healthy} != true ]]; then
   echo "health check failed; rolling back ${environment}" >&2
+  systemctl status "${service}" --no-pager --lines=20 >&2 || true
+  journalctl -u "${service}" --since "2 minutes ago" --no-pager -n 50 >&2 || true
   if [[ -n ${previous} && -d ${previous} ]]; then
     rm -f "${next_link}"
     ln -s "${previous}" "${next_link}"

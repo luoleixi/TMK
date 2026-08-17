@@ -12,6 +12,7 @@ import (
 	"tmk-glance/internal/asr"
 	"tmk-glance/internal/config"
 	"tmk-glance/internal/evaluation"
+	"tmk-glance/internal/health"
 	"tmk-glance/internal/model"
 	"tmk-glance/internal/objectstore"
 	"tmk-glance/internal/store"
@@ -41,6 +42,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 }
 
 func NewApplication(cfg *config.Config) (*Application, error) {
+	health.SetReady(false)
 	sessionStore, err := store.NewSessionStore(cfg.Storage.Driver, cfg.Storage.DBPath, cfg.Storage.DSN)
 	if err != nil {
 		return nil, err
@@ -86,10 +88,12 @@ func NewApplication(cfg *config.Config) (*Application, error) {
 		_ = sessionStore.Close()
 		return nil, fmt.Errorf("start evaluation workers: %w", err)
 	}
+	health.SetReady(true)
 	return app, nil
 }
 
 func (a *Application) Close() error {
+	health.SetReady(false)
 	if a.evaluations != nil {
 		a.evaluations.Close()
 	}
@@ -104,6 +108,8 @@ func (a *Application) Router() *gin.Engine {
 	r.Use(corsMiddleware(a.cfg.Server.AllowedOrigins))
 
 	r.GET("/api/health", handleHealth)
+	r.GET("/api/health/live", handleHealthLive)
+	r.GET("/api/health/ready", handleHealthReady)
 	adminAssets := adminui.Handler()
 	r.GET("/admin", gin.WrapH(adminAssets))
 	r.GET("/admin/*path", func(c *gin.Context) {

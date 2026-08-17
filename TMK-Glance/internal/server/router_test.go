@@ -105,6 +105,24 @@ func TestRouterSessionAndHistoryLifecycle(t *testing.T) {
 	}
 }
 
+func TestHealthEndpointsDistinguishLivenessAndReadiness(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app := newTestApplication(t, "health")
+	router := app.Router()
+	live := requestJSON(router, http.MethodGet, "/api/health/live", nil)
+	if live.Code != http.StatusOK || !bytes.Contains(live.Body.Bytes(), []byte(`"status":"alive"`)) {
+		t.Fatalf("live status=%d body=%s", live.Code, live.Body.String())
+	}
+	ready := requestJSON(router, http.MethodGet, "/api/health/ready", nil)
+	if ready.Code != http.StatusOK || !bytes.Contains(ready.Body.Bytes(), []byte(`"ready":true`)) {
+		t.Fatalf("ready status=%d body=%s", ready.Code, ready.Body.String())
+	}
+	legacy := requestJSON(router, http.MethodGet, "/api/health", nil)
+	if legacy.Code != http.StatusOK || !bytes.Contains(legacy.Body.Bytes(), []byte(`"ready":true`)) {
+		t.Fatalf("legacy health status=%d body=%s", legacy.Code, legacy.Body.String())
+	}
+}
+
 func TestApplicationsKeepStoresIsolated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	first := newTestApplication(t, "first")

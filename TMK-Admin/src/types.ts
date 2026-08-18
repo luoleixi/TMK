@@ -154,3 +154,21 @@ export type AuditEvent = {
 };
 
 export type Envelope<T> = { code: number; message: string; data: T };
+
+export type MonitorAlert = {
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  state: string;
+  activeAt?: string;
+  value?: string;
+};
+
+export type MonitorMetric = { value: number; unit?: string; error?: string };
+
+export type MonitoringSummary = {
+  generated_at: string;
+  environment: string;
+  target: { url: string; up: boolean; status_code: number; latency_ms: number; error?: string };
+  alerts: MonitorAlert[];
+  metrics: Record<string, MonitorMetric>;
+};

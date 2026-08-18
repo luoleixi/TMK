@@ -99,9 +99,34 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  monitor-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: TMK-Monitor
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: TMK-Monitor/go.mod
+      - name: Test monitor
+        run: go test ./...
+      - name: Build Linux monitor
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: mkdir -p ../dist && go build -trimpath -ldflags="-s -w" -o ../dist/tmk-monitor .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tmk-monitor-linux
+          path: dist/tmk-monitor
+          if-no-files-found: error
+          retention-days: 7
+
   build-server:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend-test, admin-test]
+    needs: [backend-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -109,17 +134,13 @@ jobs:
         with:
           go-version-file: TMK-Glance/go.mod
           cache-dependency-path: TMK-Glance/go.sum
-      - uses: actions/download-artifact@v8
-        with:
-          name: tmk-admin-test-dist
-          path: TMK-Glance/internal/adminui/dist
       - name: Build Linux server
         working-directory: TMK-Glance
         env:
           CGO_ENABLED: '0'
           GOOS: linux
           GOARCH: amd64
-        run: go build -tags adminui -trimpath -ldflags="-s -w -X tmk-glance/internal/buildinfo.Version=test -X tmk-glance/internal/buildinfo.Commit=${GITHUB_SHA}" -o ../dist/tmk-glance .
+        run: go build -trimpath -ldflags="-s -w -X tmk-glance/internal/buildinfo.Version=test -X tmk-glance/internal/buildinfo.Commit=${GITHUB_SHA}" -o ../dist/tmk-glance .
       - uses: actions/upload-artifact@v7
         with:
           name: tmk-glance-linux
@@ -128,7 +149,7 @@ jobs:
           retention-days: 7
 
   deploy-test:
-    needs: [backend-test, client-test, admin-test, build-server]
+    needs: [backend-test, client-test, admin-test, monitor-test, build-server]
     runs-on: ubuntu-latest
     environment: test
     steps:
@@ -136,6 +157,14 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: tmk-glance-linux
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: tmk-admin-test-dist
+          path: dist/admin
+      - uses: actions/download-artifact@v8
+        with:
+          name: tmk-monitor-linux
           path: dist
       - name: Configure deployment identity
         env:
@@ -158,4 +187,16 @@ jobs:
           remote_artifact="/var/lib/tmk-deploy/test/tmk-glance-${RELEASE_ID}.gz"
           scp dist/tmk-glance.gz "${USER}@${HOST}:${remote_artifact}"
           ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-test "${remote_artifact}" "${checksum}" "${RELEASE_ID}"
+          tar -C dist/admin -czf dist/tmk-admin.tar.gz .
+          admin_checksum=$(sha256sum dist/tmk-admin.tar.gz | awk '{print $1}')
+          remote_admin="/var/lib/tmk-deploy/test/tmk-admin-${RELEASE_ID}.tar.gz"
+          scp dist/tmk-admin.tar.gz "${USER}@${HOST}:${remote_admin}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-admin-test "${remote_admin}" "${admin_checksum}" "${RELEASE_ID}"
+          chmod 755 dist/tmk-monitor
+          gzip -9 -c dist/tmk-monitor > dist/tmk-monitor.gz
+          monitor_checksum=$(sha256sum dist/tmk-monitor.gz | awk '{print $1}')
+          remote_monitor="/var/lib/tmk-deploy/test/tmk-monitor-${RELEASE_ID}.gz"
+          scp dist/tmk-monitor.gz "${USER}@${HOST}:${remote_monitor}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-monitor-test "${remote_monitor}" "${monitor_checksum}" "${RELEASE_ID}"
           curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/api/health/ready"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/monitoring/api/health/ready"

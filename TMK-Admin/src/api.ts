@@ -7,6 +7,12 @@ function apiBase(): string {
   return `${deploymentPrefix}/api/v1`;
 }
 
+function monitoringBase(): string {
+  const marker = window.location.pathname.indexOf("/admin");
+  const deploymentPrefix = marker >= 0 ? window.location.pathname.slice(0, marker) : "";
+  return `${deploymentPrefix}/monitoring/api`;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -36,6 +42,13 @@ class ApiClient {
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     return this.raw<T>(path, init, true, true);
+  }
+
+  async monitoringRequest<T>(path: string): Promise<T> {
+    const response = await fetch(`${monitoringBase()}${path}`, { headers: { Accept: "application/json" } });
+    const payload = await response.json().catch(() => ({ message: "监控服务请求失败" })) as Envelope<T>;
+    if (!response.ok) throw new ApiError(response.status, payload.message || "监控服务请求失败");
+    return payload.data;
   }
 
   async upload(kind: "audio" | "text", file: File): Promise<unknown> {

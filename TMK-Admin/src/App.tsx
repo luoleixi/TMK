@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Activity, ClipboardList, Database, FileStack, Gauge, LogOut, Menu, ShieldCheck, Users, X } from "lucide-react";
+import { Activity, BellRing, ClipboardList, Database, FileStack, Gauge, LogOut, Menu, ShieldCheck, Users, X } from "lucide-react";
 import { api } from "./api";
 import { ErrorNotice } from "./components";
 import type { User } from "./types";
@@ -10,6 +10,7 @@ import EvaluationsPage from "./pages/EvaluationsPage";
 import GovernancePage from "./pages/GovernancePage";
 import ObjectsPage from "./pages/ObjectsPage";
 import UsersPage from "./pages/UsersPage";
+import MonitoringPage from "./pages/MonitoringPage";
 
 const navigation = [
   { id: "dashboard", label: "仪表盘", icon: Gauge },
@@ -19,6 +20,7 @@ const navigation = [
   { id: "evaluations", label: "评测任务", icon: Activity },
   { id: "governance", label: "数据治理", icon: ShieldCheck },
   { id: "audit", label: "审计日志", icon: ClipboardList },
+  { id: "monitoring", label: "系统监控", icon: BellRing },
 ] as const;
 
 type PageID = typeof navigation[number]["id"];
@@ -37,7 +39,7 @@ export default function App() {
   if (!user) return <Login onLogin={setUser} />;
   if (user.role !== "admin") return <AccessDenied user={user} onLogout={async () => { await api.logout(); setUser(undefined); }} />;
   if (user.must_change_password) return <ChangePassword user={user} onDone={() => setUser(undefined)} />;
-  const content = { dashboard: <DashboardPage />, users: <UsersPage />, objects: <ObjectsPage />, datasets: <DatasetsPage />, evaluations: <EvaluationsPage />, governance: <GovernancePage />, audit: <AuditPage /> };
+  const content = { dashboard: <DashboardPage />, users: <UsersPage />, objects: <ObjectsPage />, datasets: <DatasetsPage />, evaluations: <EvaluationsPage />, governance: <GovernancePage />, audit: <AuditPage />, monitoring: <MonitoringPage /> };
   return <div className="app-shell">
     <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
       <div className="brand"><span>TMK</span><strong>Admin</strong><button className="mobile-close" onClick={() => setMenuOpen(false)} title="关闭菜单"><X size={20} /></button></div>

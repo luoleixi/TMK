@@ -7,6 +7,13 @@ function apiBase(): string {
   return `${deploymentPrefix}/api/v1`;
 }
 
+function adminApiBase(): string {
+  if (import.meta.env.VITE_ADMIN_API_BASE) return import.meta.env.VITE_ADMIN_API_BASE.replace(/\/$/, "");
+  const marker = window.location.pathname.indexOf("/admin");
+  const deploymentPrefix = marker >= 0 ? window.location.pathname.slice(0, marker) : "";
+  return `${deploymentPrefix}/admin-api/api/v1`;
+}
+
 function monitoringBase(): string {
   const marker = window.location.pathname.indexOf("/admin");
   const deploymentPrefix = marker >= 0 ? window.location.pathname.slice(0, marker) : "";
@@ -59,10 +66,10 @@ class ApiClient {
 
   async download(path: string): Promise<Blob> {
     const headers = new Headers({ Authorization: `Bearer ${this.accessToken}` });
-    let response = await fetch(`${apiBase()}${path}`, { headers });
+    let response = await fetch(`${adminApiBase()}${path}`, { headers });
     if (response.status === 401 && await this.refresh()) {
       headers.set("Authorization", `Bearer ${this.accessToken}`);
-      response = await fetch(`${apiBase()}${path}`, { headers });
+      response = await fetch(`${adminApiBase()}${path}`, { headers });
     }
     if (!response.ok) throw new ApiError(response.status, "下载失败");
     return response.blob();
@@ -72,7 +79,7 @@ class ApiClient {
     const headers = new Headers(init.headers);
     if (!(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
     if (authenticate && this.accessToken) headers.set("Authorization", `Bearer ${this.accessToken}`);
-    const response = await fetch(`${apiBase()}${path}`, { ...init, headers });
+    const response = await fetch(`${adminApiBase()}${path}`, { ...init, headers });
     if (response.status === 401 && authenticate && retry && await this.refresh()) {
       return this.raw<T>(path, init, authenticate, false);
     }

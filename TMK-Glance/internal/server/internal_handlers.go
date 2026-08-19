@@ -21,5 +21,9 @@ func (a *Application) handleInternalEvaluationEvent(c *gin.Context) {
 		return
 	}
 	a.eventBus.Publish(events.New(request.EventType, request.AggregateID, request.RequestID, request.Payload))
+	if err := a.store.EnqueueOutbox(request.EventType, request.AggregateID, request.Payload); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "OUTBOX_WRITE_FAILED", "message": "event persistence failed"})
+		return
+	}
 	c.JSON(http.StatusAccepted, gin.H{"code": "ACCEPTED", "message": "event accepted"})
 }

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -73,5 +74,32 @@ func TestQueryRejectsUnknownMetric(t *testing.T) {
 	s.query(recorder, httptest.NewRequest(http.MethodGet, "/api/monitoring/query?name=secret", nil))
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestAlertWebhookPersistsIncidentWithIndependentToken(t *testing.T) {
+	path := t.TempDir() + "/incidents.jsonl"
+	s := &server{cfg: config{WebhookToken: "secret", IncidentPath: path}}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/monitoring/alerts/webhook", strings.NewReader(`{"status":"firing","alerts":[{"labels":{"alertname":"Down","service":"glance","severity":"critical"},"annotations":{"summary":"Glance down"}}]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	s.alertWebhook(recorder, request)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("webhook status = %d", recorder.Code)
+	}
+	if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), `"service":"glance"`) {
+		t.Fatalf("incident was not persisted: %v %s", err, data)
+	}
+}
+
+func TestEmergencyAuthDoesNotDependOnAdmin(t *testing.T) {
+	s := &server{cfg: config{BasicUser: "monitor", BasicPassword: "password"}}
+	handler := s.requestLog(s.auth(http.HandlerFunc(s.emergency)))
+	request := httptest.NewRequest(http.MethodGet, "/emergency/", nil)
+	request.SetBasicAuth("monitor", "password")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "带外故障排查") {
+		t.Fatalf("emergency page unavailable: %d", recorder.Code)
 	}
 }

@@ -1,0 +1,19 @@
+name: External Monitor Probe
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe emergency monitoring plane
+        run: |
+          curl --fail --show-error --silent --max-time 15 --retry 2 https://117.72.159.185/tmk-test/monitoring/api/health/live
+          curl --fail --show-error --silent --max-time 15 --retry 2 https://117.72.159.185/tmk-test/monitoring/api/health/ready

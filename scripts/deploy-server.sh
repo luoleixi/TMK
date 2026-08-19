@@ -37,6 +37,8 @@ if [[ ! ${expected_sha} =~ ^[a-fA-F0-9]{64}$ ]]; then
   echo "invalid sha256" >&2
   exit 1
 fi
+deployment_recorded=false
+trap 'status=$?; if [[ ${deployment_recorded} != true && ${status} -ne 0 && -x /usr/local/sbin/tmk-record-deployment ]]; then /usr/local/sbin/tmk-record-deployment "${environment}" glance "${release_id}" failed rollback || true; fi' EXIT
 
 upload_root="/var/lib/tmk-deploy/${environment}"
 artifact=$(readlink -f "${artifact}")
@@ -121,4 +123,6 @@ if [[ ${healthy} != true ]]; then
 fi
 
 rm -f "${artifact}"
+/usr/local/sbin/tmk-record-deployment "${environment}" glance "${release_id}" success deploy
+deployment_recorded=true
 echo "deployed ${environment} release ${release_id}"

@@ -17,6 +17,7 @@ install -m 0755 "${repo_root}/scripts/configure-nginx-capacity.sh" /usr/local/sb
 install -m 0755 "${repo_root}/scripts/deploy-admin.sh" /usr/local/sbin/tmk-deploy-admin
 install -m 0755 "${repo_root}/scripts/deploy-monitor.sh" /usr/local/sbin/tmk-deploy-monitor
 install -m 0755 "${repo_root}/scripts/deploy-admin-api.sh" /usr/local/sbin/tmk-deploy-admin-api
+install -m 0755 "${repo_root}/scripts/record-deployment.sh" /usr/local/sbin/tmk-record-deployment
 install -m 0644 "${repo_root}/deploy/systemd/tmk-glance@.service" /etc/systemd/system/tmk-glance@.service
 install -m 0644 "${repo_root}/deploy/systemd/tmk-monitor@.service" /etc/systemd/system/tmk-monitor@.service
 install -m 0644 "${repo_root}/deploy/systemd/tmk-admin-api@.service" /etc/systemd/system/tmk-admin-api@.service
@@ -107,10 +108,33 @@ for environment in test production; do
       printf 'ALERTMANAGER_URL=http://127.0.0.1:9093\n'
       printf 'TMK_HEALTH_URL=%s\n' "${health_url}"
       printf 'ADMIN_API_HEALTH_URL=%s\n' "${admin_health_url}"
+      printf 'MONITOR_BASIC_USER=monitor\nMONITOR_BASIC_PASSWORD=%s\n' "$(openssl rand -hex 24)"
     } >"/etc/tmk-monitor/${environment}.env"
     chown root:"${monitor_user}" "/etc/tmk-monitor/${environment}.env"
     chmod 0640 "/etc/tmk-monitor/${environment}.env"
   fi
+  if ! grep -q '^MONITOR_BASIC_PASSWORD=' "/etc/tmk-monitor/${environment}.env"; then
+    printf 'MONITOR_BASIC_USER=monitor\nMONITOR_BASIC_PASSWORD=%s\n' "$(openssl rand -hex 24)" >>"/etc/tmk-monitor/${environment}.env"
+  fi
+  if ! grep -q '^MONITOR_WEBHOOK_TOKEN=' "/etc/tmk-monitor/${environment}.env"; then
+    printf 'MONITOR_WEBHOOK_TOKEN=%s\n' "$(openssl rand -hex 32)" >>"/etc/tmk-monitor/${environment}.env"
+  fi
+  if ! grep -q '^MONITOR_LOG_PATH=' "/etc/tmk-monitor/${environment}.env"; then
+    printf 'MONITOR_LOG_PATH=/var/log/tmk/combined.jsonl\nMONITOR_DEPLOYMENT_PATH=/var/lib/tmk-monitor/%s/deployments.jsonl\nMONITOR_INCIDENT_PATH=/var/lib/tmk-monitor/%s/incidents.jsonl\n' "${environment}" "${environment}" >>"/etc/tmk-monitor/${environment}.env"
+  fi
+  chown root:"${monitor_user}" "/etc/tmk-monitor/${environment}.env"
+  chmod 0640 "/etc/tmk-monitor/${environment}.env"
+done
+
+install -d -m 0750 -o root -g root /etc/prometheus
+if [[ ! -f /etc/prometheus/tmk-monitor-webhook-token ]]; then
+  awk -F= '/^MONITOR_WEBHOOK_TOKEN=/{print $2; exit}' /etc/tmk-monitor/test.env > /etc/prometheus/tmk-monitor-webhook-token
+  chmod 0640 /etc/prometheus/tmk-monitor-webhook-token
+fi
+if id prometheus >/dev/null 2>&1; then chown root:prometheus /etc/prometheus/tmk-monitor-webhook-token; fi
+shared_webhook_token=$(tr -d '\r\n' </etc/prometheus/tmk-monitor-webhook-token)
+for environment in test production; do
+  sed -i "s/^MONITOR_WEBHOOK_TOKEN=.*/MONITOR_WEBHOOK_TOKEN=${shared_webhook_token}/" "/etc/tmk-monitor/${environment}.env"
 done
 
 systemctl daemon-reload

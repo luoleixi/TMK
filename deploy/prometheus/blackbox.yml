@@ -1,0 +1,12 @@
+modules:
+  https_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 204]
+  websocket:
+    prober: http
+    timeout: 10s
+    http:
+      valid_status_codes: [101, 200, 204]

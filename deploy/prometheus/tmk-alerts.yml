@@ -17,6 +17,21 @@ groups:
         annotations:
           summary: TMK Admin API is unavailable
           description: The management control plane cannot be reached, while the monitoring plane remains available.
+      - alert: TMKMonitoringPlaneDown
+        expr: up{job=~"tmk-monitor-test|tmk-monitor-production|prometheus|alertmanager"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK out-of-band monitoring component is unavailable
+          description: A component required for emergency fault investigation cannot be scraped.
+      - alert: TMKPublicProbeFailed
+        expr: probe_success{job="blackbox-public"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK public endpoint probe failed
       - alert: TMKAdminAPIUpstreamFailures
         expr: increase(tmk_admin_api_upstream_failures_total[5m]) > 5
         for: 5m

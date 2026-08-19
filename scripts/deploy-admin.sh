@@ -17,6 +17,8 @@ release_id=$4
 case "${environment}" in test|production) ;; *) echo "invalid environment" >&2; exit 1 ;; esac
 [[ ${release_id} =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid release id" >&2; exit 1; }
 [[ ${expected_sha} =~ ^[a-fA-F0-9]{64}$ ]] || { echo "invalid sha256" >&2; exit 1; }
+deployment_recorded=false
+trap 'status=$?; if [[ ${deployment_recorded} != true && ${status} -ne 0 && -x /usr/local/sbin/tmk-record-deployment ]]; then /usr/local/sbin/tmk-record-deployment "${environment}" admin-web "${release_id}" failed rollback || true; fi' EXIT
 upload_root="/var/lib/tmk-deploy/${environment}"
 case "${artifact}" in "${upload_root}"/*) ;; *) echo "artifact must be under ${upload_root}" >&2; exit 1 ;; esac
 [[ -f ${artifact} ]] || { echo "admin artifact not found" >&2; exit 1; }
@@ -38,4 +40,6 @@ rm -f "${next_link}"
 ln -s "${release_dir}" "${next_link}"
 mv -Tf "${next_link}" "${current_link}"
 rm -f "${artifact}"
+/usr/local/sbin/tmk-record-deployment "${environment}" admin-web "${release_id}" success deploy
+deployment_recorded=true
 echo "deployed admin ${environment} release ${release_id}"

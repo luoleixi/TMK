@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"tmk-glance/internal/adminui"
 	"tmk-glance/internal/asr"
 	"tmk-glance/internal/config"
 	"tmk-glance/internal/evaluation"
@@ -139,23 +138,8 @@ func (a *Application) Router() *gin.Engine {
 	})
 	internal.POST("/events/evaluation", a.handleInternalEvaluationEvent)
 	a.registerAdminRoutes(internal.Group("/admin"))
-	adminAssets := adminui.Handler()
-	r.GET("/admin", gin.WrapH(adminAssets))
-	r.GET("/admin/*path", func(c *gin.Context) {
-		c.Request.URL.Path = c.Param("path")
-		adminAssets.ServeHTTP(c.Writer, c.Request)
-	})
-
 	v1 := r.Group("/api/v1")
 	{
-		v1.POST("/auth/login", a.handleLogin)
-		v1.POST("/auth/refresh", a.handleRefresh)
-
-		auth := v1.Group("/auth", a.authenticate())
-		auth.GET("/me", a.handleMe)
-		auth.POST("/logout", a.handleLogout)
-		auth.POST("/change-password", a.handleChangePassword)
-
 		protected := v1.Group("")
 		protected.Use(a.authenticate(), requirePasswordReady())
 		protected.GET("/languages", handleLanguages)
@@ -170,8 +154,6 @@ func (a *Application) Router() *gin.Engine {
 		protected.POST("/translate", a.handleTranslate)
 		protected.GET("/interpret", a.handleInterpret)
 
-		admin := v1.Group("/admin", a.authenticate(), requirePasswordReady(), requireAdmin())
-		a.registerAdminRoutes(admin)
 	}
 
 	return r

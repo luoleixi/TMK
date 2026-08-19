@@ -51,6 +51,10 @@ type Config struct {
 		BootstrapAdminEmail    string `yaml:"bootstrap_admin_email"`
 		BootstrapAdminPassword string `yaml:"bootstrap_admin_password"`
 	} `yaml:"auth"`
+	AdminAPI struct {
+		ServiceID     string `yaml:"service_id"`
+		ServiceSecret string `yaml:"service_secret"`
+	} `yaml:"admin_api"`
 	ASR struct {
 		Provider string `yaml:"provider"`
 		Bailian  struct {
@@ -108,6 +112,7 @@ func Load(path string) (*Config, error) {
 	cfg.Governance.StuckJobMinutes = 30
 	cfg.Auth.AccessTokenTTLMinutes = 15
 	cfg.Auth.RefreshTokenTTLDays = 30
+	cfg.AdminAPI.ServiceID = "tmk-admin-api"
 	cfg.ASR.Provider = "mock"
 	cfg.ASR.Bailian.MaxSentenceSilenceMS = 600
 	cfg.ASR.Bailian.MultiThresholdModeEnabled = true
@@ -180,6 +185,12 @@ func Load(path string) (*Config, error) {
 		if value, parseErr := strconv.Atoi(v); parseErr == nil {
 			cfg.Auth.RefreshTokenTTLDays = value
 		}
+	}
+	if v := os.Getenv("ADMIN_API_SERVICE_ID"); v != "" {
+		cfg.AdminAPI.ServiceID = v
+	}
+	if v := os.Getenv("ADMIN_API_SERVICE_SECRET"); v != "" {
+		cfg.AdminAPI.ServiceSecret = v
 	}
 	if v := os.Getenv("AUTH_BOOTSTRAP_ADMIN_EMAIL"); v != "" {
 		cfg.Auth.BootstrapAdminEmail = v

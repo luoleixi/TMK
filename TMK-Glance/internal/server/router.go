@@ -13,6 +13,7 @@ import (
 	"tmk-glance/internal/asr"
 	"tmk-glance/internal/config"
 	"tmk-glance/internal/evaluation"
+	"tmk-glance/internal/events"
 	"tmk-glance/internal/health"
 	"tmk-glance/internal/model"
 	"tmk-glance/internal/objectstore"
@@ -38,6 +39,7 @@ type Application struct {
 	samplerDone     chan struct{}
 	databaseHealthy atomic.Bool
 	storageHealthy  atomic.Bool
+	eventBus        *events.Bus
 }
 
 func SetupRouter(cfg *config.Config) *gin.Engine {
@@ -58,7 +60,7 @@ func NewApplication(cfg *config.Config) (*Application, error) {
 		cfg: cfg, store: sessionStore, translator: newTranslator(cfg),
 		loginLimiter: newLoginLimiter(),
 		asrFactory:   func(language string) asr.ASR { return newASR(cfg, language) },
-		metrics:      observability.NewMetrics(), samplerStop: make(chan struct{}),
+		metrics:      observability.NewMetrics(), samplerStop: make(chan struct{}), eventBus: events.NewBus(),
 	}
 	if err := app.bootstrapAdmin(); err != nil {
 		_ = sessionStore.Close()
@@ -131,6 +133,12 @@ func (a *Application) Router() *gin.Engine {
 	r.GET("/api/health", handleHealth)
 	r.GET("/api/health/live", handleHealthLive)
 	r.GET("/api/health/ready", handleHealthReady)
+	internal := r.Group("/internal/v1", requireAdminAPI(serviceAuthConfig{ServiceID: a.cfg.AdminAPI.ServiceID, ServiceSecret: a.cfg.AdminAPI.ServiceSecret}))
+	internal.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"code": "OK", "message": "ok", "data": gin.H{"service": "glance"}})
+	})
+	internal.POST("/events/evaluation", a.handleInternalEvaluationEvent)
+	a.registerAdminRoutes(internal.Group("/admin"))
 	adminAssets := adminui.Handler()
 	r.GET("/admin", gin.WrapH(adminAssets))
 	r.GET("/admin/*path", func(c *gin.Context) {
@@ -163,35 +171,7 @@ func (a *Application) Router() *gin.Engine {
 		protected.GET("/interpret", a.handleInterpret)
 
 		admin := v1.Group("/admin", a.authenticate(), requirePasswordReady(), requireAdmin())
-		admin.GET("/users", a.handleListUsers)
-		admin.POST("/users", a.handleCreateUser)
-		admin.PATCH("/users/:id", a.handleUpdateUser)
-		admin.POST("/users/:id/reset-password", a.handleResetUserPassword)
-		admin.POST("/legacy-sessions/claim", a.handleClaimLegacySessions)
-		admin.GET("/dashboard", a.handleDashboard)
-		admin.GET("/governance/report", a.handleGovernanceReport)
-		admin.GET("/audit-logs", a.handleListAuditEvents)
-		admin.POST("/objects", a.handleUploadObject)
-		admin.GET("/objects", a.handleListObjects)
-		admin.GET("/objects/usage", a.handleStorageUsage)
-		admin.GET("/objects/:id", a.handleGetObject)
-		admin.GET("/objects/:id/content", a.handleDownloadObject)
-		admin.DELETE("/objects/:id", a.handleDeleteObject)
-		admin.POST("/datasets", a.handleCreateDataset)
-		admin.GET("/datasets", a.handleListDatasets)
-		admin.GET("/datasets/:id", a.handleGetDataset)
-		admin.PATCH("/datasets/:id", a.handleUpdateDataset)
-		admin.DELETE("/datasets/:id", a.handleDeleteDataset)
-		admin.POST("/datasets/:id/items", a.handleAddDatasetItem)
-		admin.DELETE("/datasets/:id/items/:item_id", a.handleDeleteDatasetItem)
-		admin.POST("/datasets/:id/ready", a.handleMarkDatasetReady)
-		admin.POST("/datasets/:id/archive", a.handleArchiveDataset)
-		admin.POST("/evaluation-jobs", a.handleCreateEvaluationJob)
-		admin.GET("/evaluation-jobs", a.handleListEvaluationJobs)
-		admin.GET("/evaluation-jobs/:id", a.handleGetEvaluationJob)
-		admin.GET("/evaluation-jobs/:id/results", a.handleListEvaluationResults)
-		admin.POST("/evaluation-jobs/:id/cancel", a.handleCancelEvaluationJob)
-		admin.POST("/evaluation-jobs/:id/retry", a.handleRetryEvaluationJob)
+		a.registerAdminRoutes(admin)
 	}
 
 	return r

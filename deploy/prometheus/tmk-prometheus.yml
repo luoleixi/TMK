@@ -16,3 +16,15 @@ scrape_configs:
       - targets: ["127.0.0.1:8080"]
         labels:
           environment: production
+  - job_name: tmk-admin-api-test
+    static_configs:
+      - targets: ["127.0.0.1:18180"]
+        labels:
+          environment: test
+          service: admin-api
+  - job_name: tmk-admin-api-production
+    static_configs:
+      - targets: ["127.0.0.1:28180"]
+        labels:
+          environment: production
+          service: admin-api

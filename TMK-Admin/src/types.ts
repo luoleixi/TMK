@@ -169,6 +169,7 @@ export type MonitoringSummary = {
   generated_at: string;
   environment: string;
   target: { url: string; up: boolean; status_code: number; latency_ms: number; error?: string };
+  admin_target: { url: string; up: boolean; status_code: number; latency_ms: number; error?: string };
   alerts: MonitorAlert[];
   metrics: Record<string, MonitorMetric>;
 };

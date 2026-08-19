@@ -18,6 +18,7 @@ type config struct {
 	PrometheusURL   string
 	AlertmanagerURL string
 	TargetHealthURL string
+	AdminHealthURL  string
 	Environment     string
 	RequestTimeout  time.Duration
 }
@@ -62,6 +63,7 @@ type summary struct {
 	GeneratedAt time.Time              `json:"generated_at"`
 	Environment string                 `json:"environment"`
 	Target      targetStatus           `json:"target"`
+	AdminTarget targetStatus           `json:"admin_target"`
 	Alerts      []alert                `json:"alerts"`
 	Metrics     map[string]metricValue `json:"metrics"`
 }
@@ -101,6 +103,7 @@ func loadConfig() config {
 		PrometheusURL:   strings.TrimRight(env("PROMETHEUS_URL", "http://127.0.0.1:9090"), "/"),
 		AlertmanagerURL: strings.TrimRight(env("ALERTMANAGER_URL", "http://127.0.0.1:9093"), "/"),
 		TargetHealthURL: env("TMK_HEALTH_URL", "http://127.0.0.1:18080/api/health/ready"),
+		AdminHealthURL:  env("ADMIN_API_HEALTH_URL", "http://127.0.0.1:18180/api/health/live"),
 		Environment:     env("MONITOR_ENVIRONMENT", "test"),
 		RequestTimeout:  5 * time.Second,
 	}
@@ -127,6 +130,7 @@ func (s *server) ready(w http.ResponseWriter, _ *http.Request) {
 
 func (s *server) summary(w http.ResponseWriter, r *http.Request) {
 	target := s.probeTarget(r.Context())
+	adminTarget := s.probe(r.Context(), s.cfg.AdminHealthURL)
 	metrics := make(map[string]metricValue)
 	scope := `{environment="` + s.cfg.Environment + `"}`
 	queries := map[string]string{
@@ -146,7 +150,7 @@ func (s *server) summary(w http.ResponseWriter, r *http.Request) {
 		metrics[name] = s.queryValue(r.Context(), query)
 	}
 	alerts := s.fetchAlerts(r.Context())
-	writeJSON(w, http.StatusOK, envelope[summary]{Code: 0, Message: "ok", Data: summary{GeneratedAt: time.Now().UTC(), Environment: s.cfg.Environment, Target: target, Alerts: alerts, Metrics: metrics}})
+	writeJSON(w, http.StatusOK, envelope[summary]{Code: 0, Message: "ok", Data: summary{GeneratedAt: time.Now().UTC(), Environment: s.cfg.Environment, Target: target, AdminTarget: adminTarget, Alerts: alerts, Metrics: metrics}})
 }
 
 func (s *server) alerts(w http.ResponseWriter, r *http.Request) {
@@ -171,13 +175,17 @@ func (s *server) query(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) probeTarget(ctx context.Context) targetStatus {
+	return s.probe(ctx, s.cfg.TargetHealthURL)
+}
+
+func (s *server) probe(ctx context.Context, targetURL string) targetStatus {
 	started := time.Now()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, s.cfg.TargetHealthURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
-		return targetStatus{URL: s.cfg.TargetHealthURL, Error: err.Error(), LatencyMS: time.Since(started).Milliseconds()}
+		return targetStatus{URL: targetURL, Error: err.Error(), LatencyMS: time.Since(started).Milliseconds()}
 	}
 	response, err := s.client.Do(request)
-	result := targetStatus{URL: s.cfg.TargetHealthURL, LatencyMS: time.Since(started).Milliseconds()}
+	result := targetStatus{URL: targetURL, LatencyMS: time.Since(started).Milliseconds()}
 	if err != nil {
 		result.Error = err.Error()
 		return result

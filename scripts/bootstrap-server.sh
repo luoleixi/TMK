@@ -16,8 +16,10 @@ install -m 0755 "${repo_root}/scripts/configure-observability.sh" /usr/local/sbi
 install -m 0755 "${repo_root}/scripts/configure-nginx-capacity.sh" /usr/local/sbin/tmk-configure-nginx-capacity
 install -m 0755 "${repo_root}/scripts/deploy-admin.sh" /usr/local/sbin/tmk-deploy-admin
 install -m 0755 "${repo_root}/scripts/deploy-monitor.sh" /usr/local/sbin/tmk-deploy-monitor
+install -m 0755 "${repo_root}/scripts/deploy-admin-api.sh" /usr/local/sbin/tmk-deploy-admin-api
 install -m 0644 "${repo_root}/deploy/systemd/tmk-glance@.service" /etc/systemd/system/tmk-glance@.service
 install -m 0644 "${repo_root}/deploy/systemd/tmk-monitor@.service" /etc/systemd/system/tmk-monitor@.service
+install -m 0644 "${repo_root}/deploy/systemd/tmk-admin-api@.service" /etc/systemd/system/tmk-admin-api@.service
 
 for environment in test production; do
   app_user="tmk-${environment}"
@@ -68,6 +70,24 @@ for environment in test production; do
 done
 
 for environment in test production; do
+  user="tmk-admin-api-${environment}"; id "$user" >/dev/null 2>&1 || useradd --system --home-dir "/var/lib/tmk-admin-api/${environment}" --shell /usr/sbin/nologin "$user"
+  install -d -m 0750 -o "$user" -g "$user" "/var/lib/tmk-admin-api/${environment}" "/opt/tmk-admin-api/${environment}/releases"
+  install -d -m 0750 -o root -g "$user" /etc/tmk-admin-api
+  if [[ ! -f "/etc/tmk-admin-api/${environment}.env" ]]; then
+    port=":18180"; glance="http://127.0.0.1:18080"; [[ "$environment" == production ]] && port=":28180" && glance="http://127.0.0.1:8080"
+    printf 'ADMIN_API_ADDR=%s\nGLANCE_INTERNAL_URL=%s\nADMIN_API_AUDIT_LOG=/var/lib/tmk-admin-api/%s/audit.jsonl\n' "$port" "$glance" "$environment" > "/etc/tmk-admin-api/${environment}.env"
+    chown root:"$user" "/etc/tmk-admin-api/${environment}.env"; chmod 0640 "/etc/tmk-admin-api/${environment}.env"
+  fi
+  if ! grep -q '^ADMIN_API_SERVICE_SECRET=' "/etc/tmk-admin-api/${environment}.env"; then
+    service_secret=$(openssl rand -hex 32)
+    printf 'ADMIN_API_SERVICE_SECRET=%s\n' "$service_secret" >> "/etc/tmk-admin-api/${environment}.env"
+    printf 'ADMIN_API_SERVICE_ID=tmk-admin-api\nADMIN_API_SERVICE_SECRET=%s\n' "$service_secret" >> "/etc/tmk/${environment}/tmk.env"
+  fi
+  wrapper="/usr/local/sbin/tmk-deploy-admin-api-${environment}"; printf '#!/bin/sh\nexec /usr/local/sbin/tmk-deploy-admin-api %s "$@"\n' "$environment" > "$wrapper"; chmod 0755 "$wrapper"
+  deploy_user="tmk-deploy-${environment}"; printf '%s ALL=(root) NOPASSWD: %s *\n' "$deploy_user" "$wrapper" > "/etc/sudoers.d/tmk-deploy-admin-api-${environment}"; chmod 0440 "/etc/sudoers.d/tmk-deploy-admin-api-${environment}"; visudo -cf "/etc/sudoers.d/tmk-deploy-admin-api-${environment}" >/dev/null
+done
+
+for environment in test production; do
   monitor_user="tmk-monitor-${environment}"
   if ! id "${monitor_user}" >/dev/null 2>&1; then
     useradd --system --home-dir "/var/lib/tmk-monitor/${environment}" --shell /usr/sbin/nologin "${monitor_user}"
@@ -77,7 +97,8 @@ for environment in test production; do
   if [[ ! -f "/etc/tmk-monitor/${environment}.env" ]]; then
     monitor_port=":19090"
     health_url="http://127.0.0.1:18080/api/health/ready"
-    [[ ${environment} == production ]] && monitor_port=":29090" && health_url="http://127.0.0.1:8080/api/health/ready"
+    admin_health_url="http://127.0.0.1:18180/api/health/live"
+    [[ ${environment} == production ]] && monitor_port=":29090" && health_url="http://127.0.0.1:8080/api/health/ready" && admin_health_url="http://127.0.0.1:28180/api/health/live"
     umask 0027
     {
       printf 'MONITOR_PORT=%s\n' "${monitor_port}"
@@ -85,6 +106,7 @@ for environment in test production; do
       printf 'PROMETHEUS_URL=http://127.0.0.1:9090\n'
       printf 'ALERTMANAGER_URL=http://127.0.0.1:9093\n'
       printf 'TMK_HEALTH_URL=%s\n' "${health_url}"
+      printf 'ADMIN_API_HEALTH_URL=%s\n' "${admin_health_url}"
     } >"/etc/tmk-monitor/${environment}.env"
     chown root:"${monitor_user}" "/etc/tmk-monitor/${environment}.env"
     chmod 0640 "/etc/tmk-monitor/${environment}.env"

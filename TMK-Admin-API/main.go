@@ -60,16 +60,28 @@ type App struct {
 	events      *EventBus
 	audit       *AuditLog
 	metricsData Metrics
+	users       *UserStore
 }
 
 func main() {
 	cfg := loadConfig()
-	app := &App{cfg: cfg, client: NewGlanceClient(cfg), events: NewEventBus(), audit: NewAuditLog(env("ADMIN_API_AUDIT_LOG", "./data/admin-audit.jsonl"))}
+	users, err := NewUserStore(env("ADMIN_API_DB_DSN", ""))
+	if err != nil {
+		slog.Error("admin database unavailable", "error", err)
+		os.Exit(1)
+	}
+	defer users.Close()
+	if err := users.EnsureBootstrap(context.Background(), env("ADMIN_API_ADMIN_EMAIL", ""), env("ADMIN_API_ADMIN_PASSWORD", "")); err != nil {
+		slog.Error("admin bootstrap failed", "error", err)
+		os.Exit(1)
+	}
+	app := &App{cfg: cfg, client: NewGlanceClient(cfg), events: NewEventBus(), audit: NewAuditLog(env("ADMIN_API_AUDIT_LOG", "./data/admin-audit.jsonl")), users: users}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health/live", app.live)
 	mux.HandleFunc("/api/health/ready", app.ready)
 	mux.HandleFunc("/api/health/dependencies", app.dependencies)
 	mux.HandleFunc("/api/v1/auth/login", app.login)
+	mux.HandleFunc("/api/v1/auth/register", app.register)
 	mux.HandleFunc("/api/v1/auth/refresh", app.refresh)
 	mux.HandleFunc("/api/v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
 		write(w, http.StatusOK, r, Envelope[any]{Code: "OK", Message: "ok"})

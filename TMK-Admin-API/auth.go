@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"strings"
 	"time"
@@ -29,16 +30,38 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if json.NewDecoder(r.Body).Decode(&request) != nil || !hmac.Equal([]byte(strings.ToLower(strings.TrimSpace(request.Email))), []byte(strings.ToLower(env("ADMIN_API_ADMIN_EMAIL", "admin@tmk.local")))) || !hmac.Equal([]byte(request.Password), []byte(env("ADMIN_API_ADMIN_PASSWORD", ""))) {
+	if json.NewDecoder(r.Body).Decode(&request) != nil {
+		write(w, http.StatusBadRequest, r, Envelope[any]{Code: "INVALID_REQUEST", Message: "email and password are required"})
+		return
+	}
+	user, err := a.users.FindByEmail(r.Context(), request.Email)
+	if err != nil || user.Status != "active" || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(request.Password)) != nil {
 		write(w, http.StatusUnauthorized, r, Envelope[any]{Code: "INVALID_CREDENTIALS", Message: "invalid email or password"})
 		return
 	}
-	claims := Claims{Subject: "bootstrap-admin", Email: request.Email, Role: "admin", ExpiresAt: time.Now().Add(15 * time.Minute).Unix()}
+	claims := Claims{Subject: user.ID, Email: user.Email, Role: user.Role, ExpiresAt: time.Now().Add(15 * time.Minute).Unix()}
 	access := signClaims(claims, a.cfg.ServiceSecret)
 	claims.ExpiresAt = time.Now().Add(24 * time.Hour).Unix()
 	refresh := signClaims(claims, a.cfg.ServiceSecret)
 	a.audit.Append(AuditEvent{Action: "auth.login", ResourceType: "user", ActorUserID: claims.Subject, Result: "success", OccurredAt: time.Now().UTC(), RequestID: requestID(r)})
 	write(w, http.StatusOK, r, Envelope[TokenPair]{Code: "OK", Message: "ok", Data: TokenPair{AccessToken: access, RefreshToken: refresh, TokenType: "Bearer", ExpiresInSeconds: 900, User: map[string]any{"id": claims.Subject, "email": claims.Email, "role": claims.Role, "status": "active"}}})
+}
+func (a *App) register(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Email       string `json:"email"`
+		Password    string `json:"password"`
+		DisplayName string `json:"display_name"`
+	}
+	if json.NewDecoder(r.Body).Decode(&request) != nil || !strings.Contains(request.Email, "@") || len(request.Password) < 12 {
+		write(w, http.StatusBadRequest, r, Envelope[any]{Code: "INVALID_REQUEST", Message: "valid email and password of at least 12 characters are required"})
+		return
+	}
+	user, err := a.users.Register(r.Context(), request.Email, request.Password, request.DisplayName)
+	if err != nil {
+		write(w, http.StatusConflict, r, Envelope[any]{Code: "EMAIL_UNAVAILABLE", Message: "email is already registered"})
+		return
+	}
+	write(w, http.StatusCreated, r, Envelope[map[string]any]{Code: "CREATED", Message: "registration accepted", Data: map[string]any{"id": user.ID, "email": user.Email, "role": user.Role, "status": user.Status}})
 }
 func (a *App) me(w http.ResponseWriter, r *http.Request) {
 	claims, ok := authenticateRequest(r, a.cfg.ServiceSecret)

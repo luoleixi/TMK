@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"log"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,7 +50,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 func NewApplication(cfg *config.Config) (*Application, error) {
 	health.SetReady(false)
-	sessionStore, err := store.NewSessionStore(cfg.Storage.Driver, cfg.Storage.DBPath, cfg.Storage.DSN)
+	sessionStore, err := store.NewSessionStore(cfg.Storage.Driver, "", cfg.Storage.DSN)
 	if err != nil {
 		return nil, err
 	}
@@ -70,9 +69,6 @@ func NewApplication(cfg *config.Config) (*Application, error) {
 		return nil, fmt.Errorf("unsupported object storage driver %q", cfg.ObjectStorage.Driver)
 	}
 	objectRoot := strings.TrimSpace(cfg.ObjectStorage.Root)
-	if objectRoot == "" && cfg.Storage.Driver == store.DriverSQLite && cfg.Storage.DBPath != "" {
-		objectRoot = filepath.Join(filepath.Dir(cfg.Storage.DBPath), "objects")
-	}
 	if objectRoot == "" {
 		objectRoot = "./data/objects"
 	}

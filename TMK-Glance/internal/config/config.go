@@ -15,7 +15,6 @@ type Config struct {
 	} `yaml:"server"`
 	Storage struct {
 		Driver string `yaml:"driver"`
-		DBPath string `yaml:"db_path"`
 		DSN    string `yaml:"dsn"`
 	} `yaml:"storage"`
 	ObjectStorage struct {
@@ -87,8 +86,7 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{}
 	cfg.Server.Port = ":8080"
-	cfg.Storage.Driver = "sqlite"
-	cfg.Storage.DBPath = "./tmk.db"
+	cfg.Storage.Driver = "mysql"
 	cfg.ObjectStorage.Driver = "local"
 	cfg.ObjectStorage.Root = "./data/objects"
 	cfg.ObjectStorage.MaxAudioBytes = 500 << 20
@@ -142,14 +140,9 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("TRANSLATOR_PROVIDER"); v != "" {
 		cfg.Translator.Provider = v
 	}
-	if v := os.Getenv("DB_DRIVER"); v != "" {
-		cfg.Storage.Driver = v
-	}
+	cfg.Storage.Driver = "mysql"
 	if v := os.Getenv("DB_DSN"); v != "" {
 		cfg.Storage.DSN = v
-	}
-	if v := os.Getenv("DB_PATH"); v != "" {
-		cfg.Storage.DBPath = v
 	}
 	if v := os.Getenv("OBJECT_STORAGE_DRIVER"); v != "" {
 		cfg.ObjectStorage.Driver = v

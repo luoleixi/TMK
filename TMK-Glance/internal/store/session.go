@@ -12,12 +12,10 @@ import (
 	"tmk-glance/internal/model"
 
 	_ "github.com/go-sql-driver/mysql"
-	_ "modernc.org/sqlite"
 )
 
 const (
-	DriverSQLite = "sqlite"
-	DriverMySQL  = "mysql"
+	DriverMySQL = "mysql"
 )
 
 type SessionStore struct {
@@ -29,19 +27,12 @@ type SessionStore struct {
 func NewSessionStore(driver, dbPath, dsn string) (*SessionStore, error) {
 	driver = strings.ToLower(strings.TrimSpace(driver))
 	if driver == "" {
-		driver = DriverSQLite
+		driver = DriverMySQL
 	}
-	if driver == DriverSQLite && dbPath == "" {
-		dbPath = "./tmk.db"
-	}
-	if driver == DriverMySQL && dsn == "" {
+	if dsn == "" {
 		return nil, errors.New("mysql storage requires storage.dsn or DB_DSN")
 	}
-
-	openDSN := dbPath
-	if driver == DriverMySQL {
-		openDSN = dsn
-	}
+	openDSN := dsn
 
 	db, err := sql.Open(driver, openDSN)
 	if err != nil {
@@ -60,14 +51,6 @@ func NewSessionStore(driver, dbPath, dsn string) (*SessionStore, error) {
 
 func configureDB(db *sql.DB, driver string) error {
 	switch driver {
-	case DriverSQLite:
-		db.SetMaxOpenConns(1)
-		if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-			return err
-		}
-		if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-			return err
-		}
 	case DriverMySQL:
 		db.SetMaxOpenConns(20)
 		db.SetMaxIdleConns(5)
@@ -80,8 +63,6 @@ func configureDB(db *sql.DB, driver string) error {
 
 func migrate(db *sql.DB, driver string) error {
 	switch driver {
-	case DriverSQLite:
-		return migrateSQLite(db)
 	case DriverMySQL:
 		return migrateMySQL(db)
 	default:
@@ -219,7 +200,10 @@ func migrateMySQL(db *sql.DB) error {
 	if err := migrateDatasetMySQL(db); err != nil {
 		return err
 	}
-	return migrateEvaluationMySQL(db)
+	if err := migrateEvaluationMySQL(db); err != nil {
+		return err
+	}
+	return migrateOutboxMySQL(db)
 }
 
 func (s *SessionStore) Create(ses *model.Session) error {

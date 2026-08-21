@@ -26,6 +26,11 @@ type TokenPair struct {
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		write(w, http.StatusMethodNotAllowed, r, Envelope[any]{Code: "METHOD_NOT_ALLOWED", Message: "login endpoint requires POST JSON; open the Admin page instead"})
+		return
+	}
 	var request struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`

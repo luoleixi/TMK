@@ -115,7 +115,7 @@ func (a *App) live(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) ready(w http.ResponseWriter, r *http.Request) {
-	if a.cfg.ServiceSecret == "" || env("ADMIN_API_ADMIN_PASSWORD", "") == "" {
+	if a.cfg.ServiceSecret == "" {
 		write(w, http.StatusServiceUnavailable, r, Envelope[any]{Code: "AUTH_NOT_CONFIGURED", Message: "admin api authentication is not configured"})
 		return
 	}

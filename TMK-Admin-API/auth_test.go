@@ -37,3 +37,15 @@ func TestExpiredTokenRejected(t *testing.T) {
 		t.Fatal("expired token accepted")
 	}
 }
+
+func TestLoginRejectsBrowserNavigation(t *testing.T) {
+	a := &App{}
+	recorder := httptest.NewRecorder()
+	a.login(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
+	}
+	if recorder.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("allow = %q, want POST", recorder.Header().Get("Allow"))
+	}
+}

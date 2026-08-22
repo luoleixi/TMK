@@ -33,6 +33,7 @@ func newMySQLIntegrationStore(t *testing.T) *SessionStore {
 	for _, table := range []string{
 		"evaluation_results", "evaluation_jobs", "dataset_items", "datasets", "storage_objects",
 		"records", "sessions", "auth_tokens", "audit_logs", "users",
+		"event_inbox", "event_outbox",
 	} {
 		if _, err := database.db.Exec("DELETE FROM " + table); err != nil {
 			_ = database.Close()

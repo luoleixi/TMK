@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import type { FormEvent } from 'react';
 import { SessionService } from '../bindings/changeme/internal/client/session';
 import { CaptureService } from '../bindings/changeme/internal/client/capture';
 import { SettingsService } from '../bindings/changeme/internal/client/settings';

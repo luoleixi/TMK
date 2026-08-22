@@ -46,6 +46,64 @@ select:disabled {
   opacity: 0.45;
 }
 
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #182029;
+  background: #eef1f4;
+}
+
+.auth-panel {
+  width: min(100%, 390px);
+  padding: 30px;
+  border: 1px solid #d7dde3;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(28, 39, 49, 0.12);
+}
+
+.auth-brand,
+.auth-heading,
+.account-row {
+  display: flex;
+  align-items: center;
+}
+
+.auth-brand { gap: 9px; color: #1f6b62; }
+.auth-brand span { color: #69747d; font-size: 13px; }
+.auth-heading { gap: 12px; margin: 32px 0 24px; }
+.auth-heading h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
+.auth-heading p { margin: 4px 0 0; color: #69747d; font-size: 13px; }
+.auth-form { display: grid; gap: 17px; }
+.auth-form label { display: grid; gap: 7px; color: #46515b; font-size: 13px; }
+.auth-form input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #c9d1d8;
+  border-radius: 6px;
+  color: #182029;
+  background: #ffffff;
+}
+.auth-form input:focus { border-color: #1f6b62; outline: 2px solid rgba(31, 107, 98, 0.2); }
+.auth-form button {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #1f6b62;
+  font-weight: 650;
+  cursor: pointer;
+}
+.auth-form button:disabled { opacity: 0.6; cursor: wait; }
+.auth-message { min-height: 18px; margin: 16px 0 0; color: #a23c36; font-size: 13px; }
+
 .app-shell {
   display: grid;
   grid-template-columns: 184px minmax(0, 1fr);
@@ -89,6 +147,42 @@ select:disabled {
 .sidebar-footer span {
   display: block;
 }
+
+.account-row {
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 8px 0;
+  border-top: 1px solid #292f33;
+}
+
+.account-row div {
+  min-width: 0;
+  flex: 1;
+}
+
+.account-row strong,
+.account-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-row strong { color: #dfe5e7; font-size: 11px; }
+.account-row span { margin-top: 2px; color: #778188; font-size: 9px; }
+.account-row button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  flex: 0 0 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  color: #aeb7bc;
+  background: transparent;
+  cursor: pointer;
+}
+.account-row button:hover { color: #ffffff; background: #252b2f; }
 
 .brand-block strong {
   font-size: 16px;

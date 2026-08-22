@@ -447,7 +447,27 @@ WebSocket 握手没有 JSON 请求体。
 }
 ```
 
-当前协议支持以上三种 JSON 控制消息。音频数据必须使用二进制帧。
+#### pause
+
+暂停接收音频，但保持当前 WebSocket 和会话不结束：
+
+```json
+{
+  "type": "pause"
+}
+```
+
+#### resume
+
+恢复接收音频：
+
+```json
+{
+  "type": "resume"
+}
+```
+
+服务端分别返回 `paused` 和 `resumed` 事件。当前协议支持 `start`、`ping`、`pause`、`resume`、`stop` 五种 JSON 控制消息。音频数据必须使用二进制帧。
 
 ### 4.5 服务端消息
 
@@ -521,6 +541,24 @@ WebSocket 握手没有 JSON 请求体。
 {
   "type": "stopped",
   "timestamp_ms": 1786071004123
+}
+```
+
+#### paused
+
+```json
+{
+  "type": "paused",
+  "timestamp_ms": 1786071005123
+}
+```
+
+#### resumed
+
+```json
+{
+  "type": "resumed",
+  "timestamp_ms": 1786071006123
 }
 ```
 

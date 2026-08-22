@@ -11,6 +11,9 @@ import {
   Download,
   FileText,
   History,
+  LockKeyhole,
+  LogIn,
+  LogOut,
   MessageSquareText,
   Mic,
   Pause,
@@ -40,6 +43,14 @@ type RecordEntry = {
   id: number;
   sourceText: string;
   translatedText: string;
+};
+
+type AuthUser = {
+  id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  must_change_password: boolean;
 };
 
 type DeviceInfo = {
@@ -177,7 +188,85 @@ function SubtitleWindow() {
   );
 }
 
-function MainApp() {
+function LoginScreen({ onAuthenticated }: { onAuthenticated: (user: AuthUser) => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pendingUser, setPendingUser] = useState<AuthUser | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const login = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const user = await (SessionService as any).Login(email.trim(), password) as AuthUser;
+      if (user.must_change_password) {
+        setPendingUser(user);
+        setMessage('首次登录需要设置新密码');
+      } else {
+        onAuthenticated(user);
+      }
+    } catch (error: any) {
+      setMessage(error?.message || '登录失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changePassword = async (event: FormEvent) => {
+    event.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setMessage('两次输入的新密码不一致');
+      return;
+    }
+    setBusy(true);
+    setMessage('');
+    try {
+      await (SessionService as any).ChangePassword(password, newPassword);
+      setPendingUser(null);
+      setPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setMessage('密码已更新，请使用新密码登录');
+    } catch (error: any) {
+      setMessage(error?.message || '密码修改失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="auth-page">
+      <section className="auth-panel">
+        <div className="auth-brand"><Radio size={21} /><strong>TMK</strong><span>同声传译</span></div>
+        <div className="auth-heading">
+          <LockKeyhole size={24} />
+          <div><h1>{pendingUser ? '设置新密码' : '登录'}</h1><p>{pendingUser?.email || '使用分配给你的账号继续'}</p></div>
+        </div>
+        {pendingUser ? (
+          <form onSubmit={changePassword} className="auth-form">
+            <label><span>新密码</span><input type="password" minLength={12} maxLength={72} value={newPassword} onChange={e => setNewPassword(e.target.value)} autoComplete="new-password" required /></label>
+            <label><span>确认新密码</span><input type="password" minLength={12} maxLength={72} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" required /></label>
+            <button type="submit" disabled={busy}><LockKeyhole size={17} /><span>{busy ? '正在更新...' : '更新密码'}</span></button>
+          </form>
+        ) : (
+          <form onSubmit={login} className="auth-form">
+            <label><span>邮箱</span><input type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" required autoFocus /></label>
+            <label><span>密码</span><input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required /></label>
+            <button type="submit" disabled={busy}><LogIn size={17} /><span>{busy ? '正在登录...' : '登录'}</span></button>
+          </form>
+        )}
+        {message ? <p className="auth-message" role="status">{message}</p> : null}
+      </section>
+    </main>
+  );
+}
+
+function MainApp({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [sourceLang, setSourceLang] = useState('zh');
   const [targetLang, setTargetLang] = useState('en');
   const [running, setRunning] = useState(false);
@@ -540,6 +629,10 @@ function MainApp() {
             <span>{status}</span>
           </div>
         </div>
+        <div className="account-row">
+          <div><strong>{user.display_name || user.email}</strong><span>{user.email}</span></div>
+          <button type="button" title="退出登录" aria-label="退出登录" onClick={onLogout}><LogOut size={17} /></button>
+        </div>
       </aside>
 
       <main className="workspace">
@@ -749,7 +842,26 @@ function MainApp() {
 
 function App() {
   const isSubtitleWindow = new URLSearchParams(window.location.search).get('window') === 'subtitle';
-  return isSubtitleWindow ? <SubtitleWindow /> : <MainApp />;
+  const [user, setUser] = useState<AuthUser | null>(null);
+  useEffect(() => {
+    if (isSubtitleWindow || !user) return;
+    const timer = window.setInterval(() => {
+      void (SessionService as any).AuthState().then((state: AuthUser) => {
+        if (!state?.id) setUser(null);
+      });
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [isSubtitleWindow, user?.id]);
+  if (isSubtitleWindow) return <SubtitleWindow />;
+  if (!user) return <LoginScreen onAuthenticated={setUser} />;
+  return <MainApp user={user} onLogout={() => {
+    void (async () => {
+      await CaptureService.StopCapture().catch(() => undefined);
+      await SessionService.StopInterpret().catch(() => undefined);
+      await (SessionService as any).Logout().catch(() => undefined);
+      setUser(null);
+    })();
+  }} />;
 }
 
 export default App;

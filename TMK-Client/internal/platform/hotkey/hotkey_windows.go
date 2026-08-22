@@ -6,9 +6,9 @@ import (
 	"log"
 	"sync"
 
-	"changeme/internal/platform/shortcut"
 	"github.com/wailsapp/wails/v3/pkg/w32"
 	"golang.org/x/sys/windows"
+	"tmk-client/internal/platform/shortcut"
 )
 
 const (

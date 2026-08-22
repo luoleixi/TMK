@@ -13,6 +13,9 @@ import (
 )
 
 func (a *Application) handleSummarizeHistory(c *gin.Context) {
+	if !a.requireSessionOwner(c, c.Param("id")) {
+		return
+	}
 	ses, ok, err := a.store.Get(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] get summary session failed: %v", err)
@@ -54,13 +57,18 @@ func (a *Application) handleSummarizeHistory(c *gin.Context) {
 func (a *Application) summarizeRecords(ctx context.Context, records []model.Record) (string, error) {
 	content := buildConversationText(records, true)
 	systemPrompt := "你是同声传译会话摘要助手。请使用中文输出不超过120字的摘要，包含主要话题、结论和待办事项；只返回摘要正文。"
-	return a.translator.Generate(ctx, systemPrompt, content)
+	result, err := a.translator.Generate(ctx, systemPrompt, content)
+	a.metrics.ModelTokens("configured", "summary", "input", content)
+	a.metrics.ModelTokens("configured", "summary", "output", result)
+	return result, err
 }
 
 func (a *Application) generateBrief(ctx context.Context, records []model.Record) (string, error) {
 	content := buildConversationText(records, false)
 	systemPrompt := "你是会话主题命名助手。请用8到24个中文字符概括会话主要内容，输出一个简短主题短语，不要写‘总结’或‘摘要’，不要解释。"
 	brief, err := a.translator.Generate(ctx, systemPrompt, content)
+	a.metrics.ModelTokens("configured", "brief", "input", content)
+	a.metrics.ModelTokens("configured", "brief", "output", brief)
 	if err != nil {
 		return "", err
 	}

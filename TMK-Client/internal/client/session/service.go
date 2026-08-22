@@ -1,7 +1,6 @@
 package session
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,14 +9,19 @@ import (
 	"sync"
 	"time"
 
-	runtimeconfig "changeme/internal/client/runtime"
+	runtimeconfig "tmk-client/internal/client/runtime"
 
 	"github.com/gorilla/websocket"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// EventEmitter is the small UI boundary needed by the session client.
+// The Wails adapter is supplied by the application entry point.
+type EventEmitter func(name string, value any)
 
 type SessionService struct {
 	mu           sync.Mutex
+	authMu       sync.RWMutex
+	refreshMu    sync.Mutex
 	writeMu      sync.Mutex
 	conn         *websocket.Conn
 	running      bool
@@ -28,14 +32,24 @@ type SessionService struct {
 	apiURL       func() string
 	webSocketURL func(string, url.Values) (string, error)
 	dialer       *websocket.Dialer
+	emit         EventEmitter
+	accessToken  string
+	refreshToken string
+	accessExpiry time.Time
+	user         AuthUser
 }
 
-func NewService() *SessionService {
+func NewService(emitters ...EventEmitter) *SessionService {
+	var emit EventEmitter
+	if len(emitters) > 0 {
+		emit = emitters[0]
+	}
 	return &SessionService{
 		httpClient:   &http.Client{Timeout: 15 * time.Second},
 		apiURL:       runtimeconfig.BackendAPIURL,
 		webSocketURL: runtimeconfig.BackendWebSocketURL,
 		dialer:       websocket.DefaultDialer,
+		emit:         emit,
 	}
 }
 
@@ -44,7 +58,7 @@ func (s *SessionService) CreateSession(sourceLang, targetLang, inputType string)
 	if err != nil {
 		return "", fmt.Errorf("encode session: %w", err)
 	}
-	resp, err := s.httpClient.Post(s.apiURL()+"/sessions", "application/json", bytes.NewReader(body))
+	resp, err := s.doAuthenticated(http.MethodPost, s.apiURL()+"/sessions", body)
 	if err != nil {
 		return "", fmt.Errorf("create session: %w", err)
 	}
@@ -89,7 +103,13 @@ func (s *SessionService) StartInterpret() error {
 	if err != nil {
 		return err
 	}
-	conn, _, err := s.dialer.Dial(wsURL, nil)
+	header := http.Header{}
+	token, tokenErr := s.validAccessToken()
+	if tokenErr != nil {
+		return tokenErr
+	}
+	header.Set("Authorization", "Bearer "+token)
+	conn, _, err := s.dialer.Dial(wsURL, header)
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)
 	}
@@ -141,20 +161,26 @@ func (s *SessionService) readLoop(conn *websocket.Conn, epoch uint64) {
 		}
 		switch envelope.Type {
 		case "started":
-			application.Get().Event.Emit("stream-reset", true)
+			s.emitEvent("stream-reset", true)
 		case "transcript":
 			var event TranscriptMsg
 			if err := json.Unmarshal(message, &event); err == nil {
-				application.Get().Event.Emit("transcript", event)
+				s.emitEvent("transcript", event)
 			}
 		case "translation":
 			var event TranslationMsg
 			if err := json.Unmarshal(message, &event); err == nil {
-				application.Get().Event.Emit("translation", event)
+				s.emitEvent("translation", event)
 			}
 		case "error":
 			log.Printf("[ws] error: %s", message)
 		}
+	}
+}
+
+func (s *SessionService) emitEvent(name string, value any) {
+	if s.emit != nil {
+		s.emit(name, value)
 	}
 }
 

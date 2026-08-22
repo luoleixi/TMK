@@ -1,7 +1,6 @@
 package session
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -30,7 +29,7 @@ func (s *SessionService) SearchHistory(offset, limit int, keyword, dateFrom, dat
 		q.Set("date_to", dateTo)
 	}
 	u.RawQuery = q.Encode()
-	resp, err := s.httpClient.Get(u.String())
+	resp, err := s.doAuthenticated(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list history: %w", err)
 	}
@@ -48,7 +47,7 @@ func (s *SessionService) SearchHistory(offset, limit int, keyword, dateFrom, dat
 }
 
 func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
-	resp, err := s.httpClient.Get(s.apiURL() + "/history/" + url.PathEscape(sessionID))
+	resp, err := s.doAuthenticated(http.MethodGet, s.apiURL()+"/history/"+url.PathEscape(sessionID), nil)
 	if err != nil {
 		return nil, fmt.Errorf("get history: %w", err)
 	}
@@ -66,7 +65,7 @@ func (s *SessionService) GetHistory(sessionID string) (*HistoryDetail, error) {
 }
 
 func (s *SessionService) SummarizeHistory(sessionID string) (string, error) {
-	resp, err := s.httpClient.Post(s.apiURL()+"/history/"+url.PathEscape(sessionID)+"/summary", "application/json", nil)
+	resp, err := s.doAuthenticated(http.MethodPost, s.apiURL()+"/history/"+url.PathEscape(sessionID)+"/summary", nil)
 	if err != nil {
 		return "", fmt.Errorf("summarize history: %w", err)
 	}
@@ -89,11 +88,7 @@ func (s *SessionService) SummarizeHistory(sessionID string) (string, error) {
 }
 
 func (s *SessionService) DeleteHistory(sessionID string) error {
-	req, err := http.NewRequest(http.MethodDelete, s.apiURL()+"/history/"+url.PathEscape(sessionID), nil)
-	if err != nil {
-		return err
-	}
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.doAuthenticated(http.MethodDelete, s.apiURL()+"/history/"+url.PathEscape(sessionID), nil)
 	if err != nil {
 		return fmt.Errorf("delete history: %w", err)
 	}
@@ -109,7 +104,7 @@ func (s *SessionService) DeleteHistoryBatch(ids []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	resp, err := s.httpClient.Post(s.apiURL()+"/history/delete", "application/json", bytes.NewReader(body))
+	resp, err := s.doAuthenticated(http.MethodPost, s.apiURL()+"/history/delete", body)
 	if err != nil {
 		return 0, fmt.Errorf("delete history batch: %w", err)
 	}

@@ -5,6 +5,47 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
+export class AuthUser {
+    "id": string;
+    "email": string;
+    "display_name": string;
+    "role": string;
+    "status": string;
+    "must_change_password": boolean;
+
+    /** Creates a new AuthUser instance. */
+    constructor($$source: Partial<AuthUser> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("email" in $$source)) {
+            this["email"] = "";
+        }
+        if (!("display_name" in $$source)) {
+            this["display_name"] = "";
+        }
+        if (!("role" in $$source)) {
+            this["role"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+        if (!("must_change_password" in $$source)) {
+            this["must_change_password"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AuthUser instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AuthUser {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AuthUser($$parsedSource as Partial<AuthUser>);
+    }
+}
+
 export class HistoryDetail {
     "session_id": string;
     "source_lang": string;

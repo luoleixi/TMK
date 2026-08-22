@@ -6,13 +6,13 @@ import (
 	"log"
 	"time"
 
-	"changeme/internal/client/capture"
-	clientexport "changeme/internal/client/export"
-	"changeme/internal/client/session"
-	"changeme/internal/client/settings"
-	"changeme/internal/client/window"
-	"changeme/internal/platform/hotkey"
-	"changeme/internal/platform/shortcut"
+	"tmk-client/internal/client/capture"
+	clientexport "tmk-client/internal/client/export"
+	"tmk-client/internal/client/session"
+	"tmk-client/internal/client/settings"
+	clientwindow "tmk-client/internal/client/window"
+	"tmk-client/internal/platform/hotkey"
+	"tmk-client/internal/platform/shortcut"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -47,18 +47,24 @@ func main() {
 	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
 	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
 	// 'Mac' options tailor the application when running an macOS.
-	sessionSvc := session.NewService()
+	var app *application.App
+	eventEmit := func(name string, value any) {
+		if app != nil {
+			app.Event.Emit(name, value)
+		}
+	}
+	sessionSvc := session.NewService(eventEmit)
 	captureSvc := capture.NewService(sessionSvc.SendAudio)
 	settingsSvc := settings.NewService()
 	exportSvc := clientexport.NewService()
 	var mainWindow application.Window
 	var subtitleWindow application.Window
-	windowSvc := window.NewService(
-		func() application.Window { return mainWindow },
-		func() application.Window { return subtitleWindow },
+	windowSvc := clientwindow.NewService(
+		func() clientwindow.Window { return wrapWindow(mainWindow) },
+		func() clientwindow.Window { return wrapWindow(subtitleWindow) },
+		eventEmit,
 	)
 
-	var app *application.App
 	app = application.New(application.Options{
 		Name:        "TMK-Client",
 		Description: "A demo of using raw HTML & CSS",
@@ -73,9 +79,15 @@ func main() {
 			Handler: application.AssetFileServerFS(assets),
 		},
 		KeyBindings: map[string]func(window application.Window){
-			"CmdOrCtrl+Shift+S": func(window application.Window) { shortcut.Emit(app, shortcut.Start) },
-			"CmdOrCtrl+Shift+P": func(window application.Window) { shortcut.Emit(app, shortcut.Pause) },
-			"CmdOrCtrl+Shift+X": func(window application.Window) { shortcut.Emit(app, shortcut.Stop) },
+			"CmdOrCtrl+Shift+S": func(window application.Window) {
+				shortcut.Emit(func(action string) { eventEmit("shortcut", action) }, shortcut.Start)
+			},
+			"CmdOrCtrl+Shift+P": func(window application.Window) {
+				shortcut.Emit(func(action string) { eventEmit("shortcut", action) }, shortcut.Pause)
+			},
+			"CmdOrCtrl+Shift+X": func(window application.Window) {
+				shortcut.Emit(func(action string) { eventEmit("shortcut", action) }, shortcut.Stop)
+			},
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
@@ -86,7 +98,7 @@ func main() {
 				hotkey.Register(hwnd)
 				if hotkey.IsMessage(msg) {
 					if action, ok := hotkey.Handle(wParam); ok {
-						shortcut.Emit(app, action)
+						shortcut.Emit(func(action string) { eventEmit("shortcut", action) }, action)
 						return 0, true
 					}
 				}
@@ -158,3 +170,18 @@ func main() {
 		log.Fatal(err)
 	}
 }
+
+type wailsWindow struct{ application.Window }
+
+func wrapWindow(w application.Window) clientwindow.Window {
+	if w == nil {
+		return nil
+	}
+	return wailsWindow{Window: w}
+}
+
+func (w wailsWindow) Show()                 { w.Window.Show() }
+func (w wailsWindow) Hide()                 { w.Window.Hide() }
+func (w wailsWindow) Focus()                { w.Window.Focus() }
+func (w wailsWindow) IsVisible() bool       { return w.Window.IsVisible() }
+func (w wailsWindow) SetAlwaysOnTop(v bool) { w.Window.SetAlwaysOnTop(v) }

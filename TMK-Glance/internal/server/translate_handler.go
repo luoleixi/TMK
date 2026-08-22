@@ -1,8 +1,14 @@
 package server
 
-import "github.com/gin-gonic/gin"
+import (
+	"log/slog"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
 
 func (a *Application) handleTranslate(c *gin.Context) {
+	started := time.Now()
 	var req struct {
 		Text       string `json:"text"`
 		SourceLang string `json:"source_lang"`
@@ -17,9 +23,17 @@ func (a *Application) handleTranslate(c *gin.Context) {
 		return
 	}
 	result, err := a.translator.Translate(c.Request.Context(), req.SourceLang, req.TargetLang, req.Text)
+	a.metrics.ModelTokens("configured", "translation_http", "input", req.Text)
 	if err != nil {
+		a.metrics.Translation("http", "error", time.Since(started))
+		slog.WarnContext(c.Request.Context(), "translation request failed", "mode", "http", "source_lang", req.SourceLang,
+			"target_lang", req.TargetLang, "outcome", "error", "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		c.JSON(502, gin.H{"code": 502, "message": err.Error()})
 		return
 	}
+	a.metrics.Translation("http", "success", time.Since(started))
+	a.metrics.ModelTokens("configured", "translation_http", "output", result)
+	slog.InfoContext(c.Request.Context(), "translation request completed", "mode", "http", "source_lang", req.SourceLang,
+		"target_lang", req.TargetLang, "outcome", "success", "duration_ms", time.Since(started).Milliseconds())
 	c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"translated_text": result}})
 }

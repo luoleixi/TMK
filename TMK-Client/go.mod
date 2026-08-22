@@ -1,4 +1,4 @@
-module changeme
+module tmk-client
 
 go 1.25.0
 

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"time"
 
 	"tmk-glance/internal/model"
+	"tmk-glance/internal/observability"
 	"tmk-glance/internal/store"
 	"tmk-glance/internal/translator"
 
@@ -41,6 +43,7 @@ type translationScheduler struct {
 	partialCh  chan translationJob
 	finalCh    chan translationJob
 	done       chan struct{}
+	metrics    *observability.Metrics
 }
 
 func newTranslationScheduler(
@@ -50,10 +53,10 @@ func newTranslationScheduler(
 	targetLang string,
 	translatorSvc translator.Translator,
 	sessionStore *store.SessionStore,
-	send func(any),
+	send func(any), metrics ...*observability.Metrics,
 ) *translationScheduler {
 	ctx, cancel := context.WithCancel(parent)
-	return &translationScheduler{
+	scheduler := &translationScheduler{
 		ctx:        ctx,
 		cancel:     cancel,
 		sessionID:  sessionID,
@@ -66,6 +69,10 @@ func newTranslationScheduler(
 		finalCh:    make(chan translationJob, 16),
 		done:       make(chan struct{}),
 	}
+	if len(metrics) > 0 {
+		scheduler.metrics = metrics[0]
+	}
+	return scheduler
 }
 
 func (s *translationScheduler) start() {
@@ -181,6 +188,7 @@ func (s *translationScheduler) drainPartials() {
 }
 
 func (s *translationScheduler) translate(job translationJob) {
+	started := time.Now()
 	timeout := partialTranslateTimeout
 	if job.IsFinal {
 		timeout = finalTranslateTimeout
@@ -190,12 +198,32 @@ func (s *translationScheduler) translate(job translationJob) {
 	defer cancel()
 
 	translated, err := s.translator.Translate(ctx, s.sourceLang, s.targetLang, job.Text)
+	if s.metrics != nil {
+		s.metrics.ModelTokens("configured", "translation", "input", job.Text)
+	}
+	mode := "partial"
+	if job.IsFinal {
+		mode = "final"
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) && s.ctx.Err() != nil {
 			return
 		}
-		log.Printf("[translate] fallback to source text, session=%s seq=%d final=%v err=%v", s.sessionID, job.Seq, job.IsFinal, err)
+		slog.Warn("translation request failed; falling back to source", "component", "translation", "session_id", s.sessionID,
+			"seq", job.Seq, "final", job.IsFinal, "outcome", "fallback", "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		translated = job.Text
+	}
+	if s.metrics != nil {
+		s.metrics.ModelTokens("configured", "translation", "output", translated)
+		outcome := "success"
+		if err != nil {
+			outcome = "fallback"
+		}
+		s.metrics.Translation(mode, outcome, time.Since(started))
+	}
+	if err == nil {
+		slog.Debug("translation request completed", "component", "translation", "session_id", s.sessionID,
+			"seq", job.Seq, "mode", mode, "outcome", "success", "duration_ms", time.Since(started).Milliseconds())
 	}
 
 	if s.ctx.Err() != nil {

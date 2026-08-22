@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
 	"tmk-glance/internal/asr"
+	"tmk-glance/internal/observability"
 	"tmk-glance/internal/segmenter"
 	"tmk-glance/internal/store"
 	"tmk-glance/internal/translator"
@@ -46,7 +48,10 @@ type sessionActor struct {
 	audioCount       atomic.Int64
 	droppedAudioCnt  atomic.Int64
 	droppedSendCount atomic.Int64
+	metrics          *observability.Metrics
+	logger           *slog.Logger
 	seq              int64
+	paused           bool
 }
 
 // providerStream preserves provider sentence boundaries when local segmentation
@@ -94,8 +99,8 @@ func (p *providerStream) flush() []segmenter.Segment {
 	return []segmenter.Segment{segment}
 }
 
-func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store.SessionStore, translatorSvc translator.Translator, segmenterConfig segmenter.Config, asrFactory func(string) asr.ASR, queueBrief func(string)) *sessionActor {
-	return &sessionActor{
+func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store.SessionStore, translatorSvc translator.Translator, segmenterConfig segmenter.Config, asrFactory func(string) asr.ASR, queueBrief func(string), metrics ...*observability.Metrics) *sessionActor {
+	actor := &sessionActor{
 		conn:            conn,
 		sessionID:       sessionID,
 		store:           sessionStore,
@@ -106,7 +111,12 @@ func newSessionActor(conn *websocket.Conn, sessionID string, sessionStore *store
 		asrCancel:       func() {},
 		sendCh:          make(chan any, sendQueueSize),
 		done:            make(chan struct{}),
+		logger:          slog.Default().With("component", "websocket", "session_id", sessionID),
 	}
+	if len(metrics) > 0 {
+		actor.metrics = metrics[0]
+	}
+	return actor
 }
 
 func (a *sessionActor) run() {
@@ -166,16 +176,22 @@ func (a *sessionActor) cleanup() {
 }
 
 func (a *sessionActor) handleAudio(msg []byte) {
-	if a.audioCh == nil {
+	if a.audioCh == nil || a.paused {
 		return
 	}
 	select {
 	case a.audioCh <- msg:
+		if a.metrics != nil {
+			a.metrics.AudioChunk("accepted")
+		}
 		count := a.audioCount.Add(1)
 		if count%50 == 1 {
 			log.Printf("[ws] received %d audio chunks, session=%s", count, a.sessionID)
 		}
 	default:
+		if a.metrics != nil {
+			a.metrics.AudioChunk("dropped")
+		}
 		count := a.droppedAudioCnt.Add(1)
 		if count%50 == 1 {
 			log.Printf("[ws] drop audio chunk, session=%s dropped=%d", a.sessionID, count)
@@ -194,6 +210,20 @@ func (a *sessionActor) handleControl(msgType string) bool {
 		})
 	case "ping":
 		a.writeJSON(gin.H{"type": "pong", "timestamp_ms": time.Now().UnixMilli()})
+	case "pause":
+		if a.asrEngine == nil {
+			a.writeJSON(gin.H{"type": "error", "message": "session not started"})
+			break
+		}
+		a.paused = true
+		a.writeJSON(gin.H{"type": "paused", "timestamp_ms": time.Now().UnixMilli()})
+	case "resume":
+		if a.asrEngine == nil {
+			a.writeJSON(gin.H{"type": "error", "message": "session not started"})
+			break
+		}
+		a.paused = false
+		a.writeJSON(gin.H{"type": "resumed", "timestamp_ms": time.Now().UnixMilli()})
 	case "stop":
 		a.stopPipeline()
 		a.writeJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
@@ -205,6 +235,7 @@ func (a *sessionActor) handleControl(msgType string) bool {
 }
 
 func (a *sessionActor) startInterpret() {
+	a.paused = false
 	ok, err := a.store.Activate(a.sessionID)
 	if err != nil {
 		log.Printf("[db] activate session failed: %v", err)
@@ -224,11 +255,26 @@ func (a *sessionActor) startInterpret() {
 	}
 
 	a.asrCtx, a.asrCancel = context.WithCancel(context.Background())
+	asrStarted := time.Now()
 	a.asrEngine = a.asrFactory(ses.SourceLang)
+	if a.asrEngine == nil {
+		if a.metrics != nil {
+			a.metrics.ASR("realtime", "error", time.Since(asrStarted))
+		}
+		a.logger.Error("asr request failed", "mode", "realtime", "outcome", "error",
+			"duration_ms", time.Since(asrStarted).Milliseconds(), "error", "ASR engine is unavailable")
+		a.writeJSON(gin.H{"type": "error", "message": "ASR engine is unavailable"})
+		return
+	}
 	a.audioCh = make(chan []byte, audioQueueSize)
 
 	resultCh, err := a.asrEngine.Recognize(a.asrCtx, a.audioCh)
 	if err != nil {
+		if a.metrics != nil {
+			a.metrics.ASR("realtime", "error", time.Since(asrStarted))
+		}
+		a.logger.Warn("asr request failed", "mode", "realtime", "outcome", "error",
+			"duration_ms", time.Since(asrStarted).Milliseconds(), "error", err)
 		if _, dbErr := a.store.Fail(a.sessionID); dbErr != nil {
 			log.Printf("[db] fail session failed: %v", dbErr)
 		}
@@ -236,7 +282,7 @@ func (a *sessionActor) startInterpret() {
 		return
 	}
 
-	a.scheduler = newTranslationScheduler(context.Background(), a.sessionID, ses.SourceLang, ses.TargetLang, a.translatorSvc, a.store, a.writeJSON)
+	a.scheduler = newTranslationScheduler(context.Background(), a.sessionID, ses.SourceLang, ses.TargetLang, a.translatorSvc, a.store, a.writeJSON, a.metrics)
 	a.scheduler.start()
 	a.pipelineDone = make(chan struct{})
 
@@ -244,11 +290,22 @@ func (a *sessionActor) startInterpret() {
 
 	scheduler := a.scheduler
 	done := a.pipelineDone
-	go a.consumeASRResults(resultCh, scheduler, done)
+	go a.consumeASRResults(resultCh, scheduler, done, asrStarted)
 }
 
-func (a *sessionActor) consumeASRResults(resultCh <-chan asr.Result, scheduler *translationScheduler, done chan<- struct{}) {
+func (a *sessionActor) consumeASRResults(resultCh <-chan asr.Result, scheduler *translationScheduler, done chan<- struct{}, started time.Time) {
 	defer close(done)
+	outcome := "success"
+	defer func() {
+		if outcome != "error" && a.asrCtx.Err() != nil {
+			outcome = "cancelled"
+		}
+		elapsed := time.Since(started)
+		if a.metrics != nil {
+			a.metrics.ASR("realtime", outcome, elapsed)
+		}
+		a.logger.Info("asr request completed", "mode", "realtime", "outcome", outcome, "duration_ms", elapsed.Milliseconds())
+	}()
 	stream := segmenter.New(a.segmenterConfig)
 	provider := newProviderStream()
 	ticker := time.NewTicker(50 * time.Millisecond)
@@ -264,6 +321,15 @@ func (a *sessionActor) consumeASRResults(resultCh <-chan asr.Result, scheduler *
 				} else {
 					a.publishSegments(provider.flush(), scheduler)
 				}
+				return
+			}
+			if result.Error != "" {
+				outcome = "error"
+				a.logger.Warn("asr stream failed", "mode", "realtime", "error", result.Error)
+				if _, err := a.store.Fail(a.sessionID); err != nil {
+					a.logger.Error("mark session failed after asr error", "error", err)
+				}
+				a.writeJSON(gin.H{"type": "error", "message": "ASR service error"})
 				return
 			}
 			if a.segmenterConfig.Enabled {
@@ -311,6 +377,7 @@ func (a *sessionActor) publishSegments(segments []segmenter.Segment, scheduler *
 }
 
 func (a *sessionActor) stopPipeline() {
+	a.paused = false
 	if a.asrEngine == nil && a.scheduler == nil {
 		return
 	}

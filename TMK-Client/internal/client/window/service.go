@@ -1,19 +1,29 @@
 package window
 
-import "github.com/wailsapp/wails/v3/pkg/application"
-
-type WindowService struct {
-	mainWindow     func() application.Window
-	subtitleWindow func() application.Window
+type Window interface {
+	Show()
+	Hide()
+	Focus()
+	IsVisible() bool
+	SetAlwaysOnTop(bool)
 }
 
-func NewService(mainWindow, subtitleWindow func() application.Window) *WindowService {
-	return &WindowService{mainWindow: mainWindow, subtitleWindow: subtitleWindow}
+type EventEmitter func(name string, value any)
+
+type WindowService struct {
+	mainWindow     func() Window
+	subtitleWindow func() Window
+	emit           EventEmitter
+}
+
+func NewService(mainWindow, subtitleWindow func() Window, emit EventEmitter) *WindowService {
+	return &WindowService{mainWindow: mainWindow, subtitleWindow: subtitleWindow, emit: emit}
 }
 
 func (s *WindowService) ShowMain() {
 	if window := s.mainWindow(); window != nil {
-		window.Show().Focus()
+		window.Show()
+		window.Focus()
 	}
 }
 
@@ -41,10 +51,13 @@ func (s *WindowService) SetSubtitleVisible(visible bool) bool {
 		return false
 	}
 	if visible {
-		window.SetAlwaysOnTop(true).Show()
+		window.SetAlwaysOnTop(true)
+		window.Show()
 	} else {
 		window.Hide()
 	}
-	application.Get().Event.Emit("subtitle-visibility-changed", visible)
+	if s.emit != nil {
+		s.emit("subtitle-visibility-changed", visible)
+	}
 	return visible
 }

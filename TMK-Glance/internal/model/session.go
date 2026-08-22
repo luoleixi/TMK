@@ -4,6 +4,7 @@ import "time"
 
 type Session struct {
 	ID          string     `json:"id"`
+	UserID      string     `json:"-"`
 	SourceLang  string     `json:"source_lang"`
 	TargetLang  string     `json:"target_lang"`
 	InputType   string     `json:"input_type"`

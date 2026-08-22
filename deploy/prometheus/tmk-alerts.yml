@@ -1,0 +1,111 @@
+groups:
+  - name: tmk-availability
+    rules:
+      - alert: TMKReadinessFailed
+        expr: up{job=~"tmk-test|tmk-production"} == 0 or tmk_application_ready == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK metrics endpoint is unavailable
+          description: Prometheus cannot scrape a TMK environment.
+      - alert: TMKAdminAPIDown
+        expr: up{job=~"tmk-admin-api-test|tmk-admin-api-production"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK Admin API is unavailable
+          description: The management control plane cannot be reached, while the monitoring plane remains available.
+      - alert: TMKMonitoringPlaneDown
+        expr: up{job=~"tmk-monitor-test|tmk-monitor-production|prometheus|alertmanager"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK out-of-band monitoring component is unavailable
+          description: A component required for emergency fault investigation cannot be scraped.
+      - alert: TMKPublicProbeFailed
+        expr: probe_success{job="blackbox-public"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK public endpoint probe failed
+      - alert: TMKAdminAPIUpstreamFailures
+        expr: increase(tmk_admin_api_upstream_failures_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK Admin API cannot reach Glance
+      - alert: TMKHighHTTP5xxRate
+        expr: sum by (environment) (rate(tmk_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum by (environment) (rate(tmk_http_requests_total[5m])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK HTTP 5xx rate is high
+      - alert: TMKEvaluationQueueBacklog
+        expr: tmk_evaluation_jobs_queued > 20
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK evaluation queue is backing up
+      - alert: TMKObjectStorageLowDisk
+        expr: tmk_object_storage_free_bytes < 2147483648
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK object storage free space is low
+      - alert: TMKAudioDropRateHigh
+        expr: sum by (environment) (rate(tmk_websocket_audio_chunks_total{result="dropped"}[5m])) / clamp_min(sum by (environment) (rate(tmk_websocket_audio_chunks_total[5m])), 0.001) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK WebSocket audio drop rate is high
+      - alert: TMKTranslationFallbackRateHigh
+        expr: sum by (environment) (rate(tmk_translation_requests_total{outcome=~"fallback|error"}[5m])) / clamp_min(sum by (environment) (rate(tmk_translation_requests_total[5m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK translation fallback rate is high
+      - alert: TMKASRFailureRateHigh
+        expr: (sum by (environment) (rate(tmk_asr_requests_total{outcome="error"}[10m])) / clamp_min(sum by (environment) (rate(tmk_asr_requests_total{outcome=~"success|error"}[10m])), 0.001)) > 0.05 and sum by (environment) (increase(tmk_asr_requests_total{outcome=~"success|error"}[10m])) >= 5
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: TMK ASR failure rate is high
+      - alert: TMKTranslationLatencyHigh
+        expr: histogram_quantile(0.95, sum by (environment, le) (rate(tmk_translation_duration_seconds{outcome=~"success|fallback|error"}[10m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK translation p95 latency is high
+      - alert: TMKEvaluationTaskExecutionSlow
+        expr: histogram_quantile(0.95, sum by (environment, le) (rate(tmk_evaluation_task_execution_duration_seconds[15m]))) > 900
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK evaluation task execution p95 is high
+      - alert: TMKDatabaseConnectionContention
+        expr: sum by (environment) (rate(tmk_db_connection_wait_total[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TMK database connection pool is experiencing contention
+      - alert: TMKEvaluationTaskDeadLettered
+        expr: sum by (environment) (increase(tmk_evaluation_task_transitions_total{transition="dead_lettered"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: A TMK evaluation task entered the dead-letter state

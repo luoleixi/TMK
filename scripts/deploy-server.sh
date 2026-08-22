@@ -37,6 +37,8 @@ if [[ ! ${expected_sha} =~ ^[a-fA-F0-9]{64}$ ]]; then
   echo "invalid sha256" >&2
   exit 1
 fi
+deployment_recorded=false
+trap 'status=$?; if [[ ${deployment_recorded} != true && ${status} -ne 0 && -x /usr/local/sbin/tmk-record-deployment ]]; then /usr/local/sbin/tmk-record-deployment "${environment}" glance "${release_id}" failed rollback || true; fi' EXIT
 
 upload_root="/var/lib/tmk-deploy/${environment}"
 artifact=$(readlink -f "${artifact}")
@@ -97,7 +99,7 @@ systemctl restart "${service}"
 
 healthy=false
 for _ in $(seq 1 30); do
-  if curl --fail --silent --max-time 2 "http://127.0.0.1:${health_port}/api/health" >/dev/null; then
+  if curl --fail --silent --max-time 2 "http://127.0.0.1:${health_port}/api/health/ready" >/dev/null; then
     healthy=true
     break
   fi
@@ -106,6 +108,8 @@ done
 
 if [[ ${healthy} != true ]]; then
   echo "health check failed; rolling back ${environment}" >&2
+  systemctl status "${service}" --no-pager --lines=20 >&2 || true
+  journalctl -u "${service}" --since "2 minutes ago" --no-pager -n 50 >&2 || true
   if [[ -n ${previous} && -d ${previous} ]]; then
     rm -f "${next_link}"
     ln -s "${previous}" "${next_link}"
@@ -119,4 +123,6 @@ if [[ ${healthy} != true ]]; then
 fi
 
 rm -f "${artifact}"
+/usr/local/sbin/tmk-record-deployment "${environment}" glance "${release_id}" success deploy
+deployment_recorded=true
 echo "deployed ${environment} release ${release_id}"

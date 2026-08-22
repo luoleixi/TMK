@@ -1,0 +1,31 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: test-monitor
+  group_by: [alertname, environment, service]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: production-monitor
+      matchers:
+        - environment="production"
+
+receivers:
+  - name: test-monitor
+    webhook_configs:
+      - url: http://127.0.0.1:19090/api/monitoring/alerts/webhook
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/prometheus/tmk-monitor-webhook-token
+  - name: production-monitor
+    webhook_configs:
+      - url: http://127.0.0.1:29090/api/monitoring/alerts/webhook
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/prometheus/tmk-monitor-webhook-token

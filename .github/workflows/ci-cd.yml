@@ -21,6 +21,23 @@ concurrency:
 jobs:
   backend-test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: integration-password
+          MYSQL_DATABASE: tmk_test
+          MYSQL_USER: tmk_test
+          MYSQL_PASSWORD: integration-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -utmk_test -pintegration-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      TMK_TEST_MYSQL_DSN: tmk_test:integration-password@tcp(127.0.0.1:3306)/tmk_test?parseTime=true
     defaults:
       run:
         working-directory: TMK-Glance
@@ -55,9 +72,85 @@ jobs:
         working-directory: TMK-Client
         run: go test -tags production ./...
 
+  admin-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: TMK-Admin
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: TMK-Admin/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Type-check and build test admin
+        env:
+          ADMIN_BASE_PATH: /tmk-test/admin/
+        run: pnpm build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tmk-admin-test-dist
+          path: TMK-Glance/internal/adminui/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  monitor-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: TMK-Monitor
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: TMK-Monitor/go.mod
+      - name: Test monitor
+        run: go test ./...
+      - name: Build Linux monitor
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: mkdir -p ../dist && go build -trimpath -ldflags="-s -w" -o ../dist/tmk-monitor .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tmk-monitor-linux
+          path: dist/tmk-monitor
+          if-no-files-found: error
+          retention-days: 7
+
+  admin-api-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: TMK-Admin-API
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: TMK-Admin-API/go.mod
+      - run: go test -race ./...
+      - name: Build Linux admin api
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: mkdir -p ../dist && go build -trimpath -ldflags="-s -w" -o ../dist/tmk-admin-api .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tmk-admin-api-linux
+          path: dist/tmk-admin-api
+          if-no-files-found: error
+          retention-days: 7
+
   build-server:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: backend-test
+    needs: [backend-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -71,7 +164,7 @@ jobs:
           CGO_ENABLED: '0'
           GOOS: linux
           GOARCH: amd64
-        run: go build -trimpath -ldflags='-s -w' -o ../dist/tmk-glance .
+        run: go build -trimpath -ldflags="-s -w -X tmk-glance/internal/buildinfo.Version=test -X tmk-glance/internal/buildinfo.Commit=${GITHUB_SHA}" -o ../dist/tmk-glance .
       - uses: actions/upload-artifact@v7
         with:
           name: tmk-glance-linux
@@ -80,7 +173,7 @@ jobs:
           retention-days: 7
 
   deploy-test:
-    needs: [backend-test, client-test, build-server]
+    needs: [backend-test, client-test, admin-test, admin-api-test, monitor-test, build-server]
     runs-on: ubuntu-latest
     environment: test
     steps:
@@ -88,6 +181,18 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: tmk-glance-linux
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: tmk-admin-test-dist
+          path: dist/admin
+      - uses: actions/download-artifact@v8
+        with:
+          name: tmk-monitor-linux
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: tmk-admin-api-linux
           path: dist
       - name: Configure deployment identity
         env:
@@ -110,4 +215,23 @@ jobs:
           remote_artifact="/var/lib/tmk-deploy/test/tmk-glance-${RELEASE_ID}.gz"
           scp dist/tmk-glance.gz "${USER}@${HOST}:${remote_artifact}"
           ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-test "${remote_artifact}" "${checksum}" "${RELEASE_ID}"
-          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/api/health"
+          tar -C dist/admin -czf dist/tmk-admin.tar.gz .
+          admin_checksum=$(sha256sum dist/tmk-admin.tar.gz | awk '{print $1}')
+          remote_admin="/var/lib/tmk-deploy/test/tmk-admin-${RELEASE_ID}.tar.gz"
+          scp dist/tmk-admin.tar.gz "${USER}@${HOST}:${remote_admin}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-admin-test "${remote_admin}" "${admin_checksum}" "${RELEASE_ID}"
+          chmod 755 dist/tmk-monitor
+          gzip -9 -c dist/tmk-monitor > dist/tmk-monitor.gz
+          monitor_checksum=$(sha256sum dist/tmk-monitor.gz | awk '{print $1}')
+          remote_monitor="/var/lib/tmk-deploy/test/tmk-monitor-${RELEASE_ID}.gz"
+          scp dist/tmk-monitor.gz "${USER}@${HOST}:${remote_monitor}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-monitor-test "${remote_monitor}" "${monitor_checksum}" "${RELEASE_ID}"
+          chmod 755 dist/tmk-admin-api
+          gzip -9 -c dist/tmk-admin-api > dist/tmk-admin-api.gz
+          admin_api_checksum=$(sha256sum dist/tmk-admin-api.gz | awk '{print $1}')
+          remote_admin_api="/var/lib/tmk-deploy/test/tmk-admin-api-${RELEASE_ID}.gz"
+          scp dist/tmk-admin-api.gz "${USER}@${HOST}:${remote_admin_api}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-admin-api-test "${remote_admin_api}" "${admin_api_checksum}" "${RELEASE_ID}"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/api/health/ready"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/admin-api/api/health/live"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/monitoring/api/health/ready"

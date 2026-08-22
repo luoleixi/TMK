@@ -11,6 +11,7 @@ Group=tmk-%i
 WorkingDirectory=/var/lib/tmk/%i
 Environment=GIN_MODE=release
 Environment=TMK_CONFIG=/etc/tmk/%i/config.yaml
+Environment=TMK_ENVIRONMENT=%i
 EnvironmentFile=/etc/tmk/%i/tmk.env
 ExecStart=/opt/tmk/%i/current/tmk-glance
 Restart=on-failure

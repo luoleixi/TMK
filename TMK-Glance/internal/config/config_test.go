@@ -31,6 +31,24 @@ translator:
 	t.Setenv("ASR_MAX_SENTENCE_SILENCE_MS", "750")
 	t.Setenv("TRANSLATOR_PROVIDER", "bailian")
 	t.Setenv("DASHSCOPE_API_KEY", "test-key")
+	t.Setenv("AUTH_ACCESS_TOKEN_TTL_MINUTES", "20")
+	t.Setenv("AUTH_REFRESH_TOKEN_TTL_DAYS", "45")
+	t.Setenv("AUTH_BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
+	t.Setenv("AUTH_BOOTSTRAP_ADMIN_PASSWORD", "test-bootstrap-password")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://admin.example.com, https://ops.example.com")
+	t.Setenv("OBJECT_STORAGE_DRIVER", "local")
+	t.Setenv("OBJECT_STORAGE_ROOT", "/srv/tmk/objects")
+	t.Setenv("OBJECT_STORAGE_MAX_AUDIO_BYTES", "123456")
+	t.Setenv("OBJECT_STORAGE_TOTAL_QUOTA_BYTES", "987654")
+	t.Setenv("EVALUATION_WORKERS", "3")
+	t.Setenv("EVALUATION_ITEM_TIMEOUT_SECONDS", "120")
+	t.Setenv("EVALUATION_LEASE_SECONDS", "90")
+	t.Setenv("EVALUATION_HEARTBEAT_SECONDS", "20")
+	t.Setenv("EVALUATION_MAX_ATTEMPTS", "5")
+	t.Setenv("EVALUATION_RETRY_BASE_SECONDS", "7")
+	t.Setenv("EVALUATION_REAPER_INTERVAL_SECONDS", "12")
+	t.Setenv("GOVERNANCE_SESSION_RETENTION_DAYS", "90")
+	t.Setenv("GOVERNANCE_STUCK_JOB_MINUTES", "45")
 
 	cfg, err := Load(configPath)
 	if err != nil {
@@ -50,5 +68,22 @@ translator:
 	}
 	if cfg.ASR.Segmenter.Enabled || cfg.ASR.Segmenter.MaxRunes != 40 || cfg.ASR.Segmenter.MaxDurationMS != 5000 || cfg.ASR.Segmenter.SoftCommitDelayMS != 300 {
 		t.Fatalf("unexpected segmenter defaults: %+v", cfg.ASR.Segmenter)
+	}
+	if cfg.Auth.AccessTokenTTLMinutes != 20 || cfg.Auth.RefreshTokenTTLDays != 45 || cfg.Auth.BootstrapAdminEmail != "admin@example.com" {
+		t.Fatalf("auth overrides not applied: %+v", cfg.Auth)
+	}
+	if len(cfg.Server.AllowedOrigins) != 2 || cfg.Server.AllowedOrigins[1] != "https://ops.example.com" {
+		t.Fatalf("CORS origins not applied: %+v", cfg.Server.AllowedOrigins)
+	}
+	if cfg.ObjectStorage.Driver != "local" || cfg.ObjectStorage.Root != "/srv/tmk/objects" || cfg.ObjectStorage.MaxAudioBytes != 123456 || cfg.ObjectStorage.TotalQuotaBytes != 987654 {
+		t.Fatalf("object storage overrides not applied: %+v", cfg.ObjectStorage)
+	}
+	if cfg.Evaluation.Workers != 3 || cfg.Evaluation.ItemTimeoutSeconds != 120 || cfg.Evaluation.LeaseSeconds != 90 ||
+		cfg.Evaluation.HeartbeatSeconds != 20 || cfg.Evaluation.MaxAttempts != 5 ||
+		cfg.Evaluation.RetryBaseSeconds != 7 || cfg.Evaluation.ReaperIntervalSeconds != 12 {
+		t.Fatalf("evaluation overrides not applied: %+v", cfg.Evaluation)
+	}
+	if cfg.Governance.SessionRetentionDays != 90 || cfg.Governance.StuckJobMinutes != 45 || cfg.Governance.AuditRetentionDays != 365 {
+		t.Fatalf("governance overrides not applied: %+v", cfg.Governance)
 	}
 }

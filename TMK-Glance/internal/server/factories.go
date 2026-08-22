@@ -5,6 +5,7 @@ import (
 
 	"tmk-glance/internal/asr"
 	"tmk-glance/internal/config"
+	"tmk-glance/internal/model"
 	"tmk-glance/internal/translator"
 )
 
@@ -22,10 +23,25 @@ func newASR(cfg *config.Config, language string) asr.ASR {
 			MultiThresholdModeEnabled:    cfg.ASR.Bailian.MultiThresholdModeEnabled,
 			PunctuationPredictionEnabled: cfg.ASR.Bailian.PunctuationPredictionEnabled,
 		})
+	case "loadtest":
+		log.Println("[asr] using load-test provider")
+		return asr.NewLoadTest()
 	default:
 		log.Println("[asr] using Mock")
 		return asr.NewMock()
 	}
+}
+
+func newEvaluationASR(cfg *config.Config, language string, snapshot model.EvaluationConfig) asr.ASR {
+	if snapshot.ASRProvider != "bailian" {
+		return asr.NewMock()
+	}
+	return asr.NewBailian(cfg.ASR.Bailian.APIKey, language, asr.BailianOptions{
+		MaxSentenceSilenceMS:         snapshot.MaxSentenceSilenceMS,
+		SemanticPunctuationEnabled:   snapshot.SemanticPunctuationEnabled,
+		MultiThresholdModeEnabled:    snapshot.MultiThresholdModeEnabled,
+		PunctuationPredictionEnabled: snapshot.PunctuationPredictionEnabled,
+	})
 }
 
 func newTranslator(cfg *config.Config) translator.Translator {

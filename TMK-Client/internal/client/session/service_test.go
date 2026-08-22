@@ -17,6 +17,8 @@ func newHTTPTestService(server *httptest.Server) *SessionService {
 		apiURL:       func() string { return server.URL + "/api/v1" },
 		webSocketURL: func(string, url.Values) (string, error) { return "ws://unused", nil },
 		dialer:       websocket.DefaultDialer,
+		accessToken:  "test-access-token",
+		accessExpiry: time.Now().Add(time.Hour),
 	}
 }
 
@@ -24,6 +26,9 @@ func TestCreateSessionUsesInjectedBackend(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sessions" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-access-token" {
+			t.Errorf("missing authorization header: %q", r.Header.Get("Authorization"))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"code":0,"data":{"id":"session-1"}}`))

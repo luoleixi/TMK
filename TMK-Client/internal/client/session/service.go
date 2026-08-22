@@ -1,7 +1,6 @@
 package session
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -21,6 +20,8 @@ type EventEmitter func(name string, value any)
 
 type SessionService struct {
 	mu           sync.Mutex
+	authMu       sync.RWMutex
+	refreshMu    sync.Mutex
 	writeMu      sync.Mutex
 	conn         *websocket.Conn
 	running      bool
@@ -32,6 +33,10 @@ type SessionService struct {
 	webSocketURL func(string, url.Values) (string, error)
 	dialer       *websocket.Dialer
 	emit         EventEmitter
+	accessToken  string
+	refreshToken string
+	accessExpiry time.Time
+	user         AuthUser
 }
 
 func NewService(emitters ...EventEmitter) *SessionService {
@@ -53,7 +58,7 @@ func (s *SessionService) CreateSession(sourceLang, targetLang, inputType string)
 	if err != nil {
 		return "", fmt.Errorf("encode session: %w", err)
 	}
-	resp, err := s.httpClient.Post(s.apiURL()+"/sessions", "application/json", bytes.NewReader(body))
+	resp, err := s.doAuthenticated(http.MethodPost, s.apiURL()+"/sessions", body)
 	if err != nil {
 		return "", fmt.Errorf("create session: %w", err)
 	}
@@ -98,7 +103,13 @@ func (s *SessionService) StartInterpret() error {
 	if err != nil {
 		return err
 	}
-	conn, _, err := s.dialer.Dial(wsURL, nil)
+	header := http.Header{}
+	token, tokenErr := s.validAccessToken()
+	if tokenErr != nil {
+		return tokenErr
+	}
+	header.Set("Authorization", "Bearer "+token)
+	conn, _, err := s.dialer.Dial(wsURL, header)
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)
 	}

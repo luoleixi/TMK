@@ -24,7 +24,7 @@ func (a *Application) handleListHistory(c *gin.Context) {
 		toTime = &t
 	}
 
-	filtered, total, err := a.store.Search(keyword, sourceLang, targetLang, fromTime, toTime, limit, offset)
+	filtered, total, err := a.store.Search(currentUser(c).ID, keyword, sourceLang, targetLang, fromTime, toTime, limit, offset)
 	if err != nil {
 		log.Printf("[db] search history failed: %v", err)
 		c.JSON(500, gin.H{"code": 500, "message": "list history failed"})
@@ -41,6 +41,9 @@ func (a *Application) handleListHistory(c *gin.Context) {
 }
 
 func (a *Application) handleGetHistory(c *gin.Context) {
+	if !a.requireSessionOwner(c, c.Param("id")) {
+		return
+	}
 	ses, ok, err := a.store.Get(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] get history session failed: %v", err)
@@ -65,6 +68,9 @@ func (a *Application) handleGetHistory(c *gin.Context) {
 }
 
 func (a *Application) handleDeleteHistory(c *gin.Context) {
+	if !a.requireSessionOwner(c, c.Param("id")) {
+		return
+	}
 	ok, err := a.store.Delete(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] delete history failed: %v", err)
@@ -89,6 +95,11 @@ func (a *Application) handleDeleteHistoryBatch(c *gin.Context) {
 	if len(req.IDs) == 0 {
 		c.JSON(400, gin.H{"code": 400, "message": "ids are required"})
 		return
+	}
+	for _, id := range req.IDs {
+		if !a.requireSessionOwner(c, id) {
+			return
+		}
 	}
 	deleted, err := a.store.DeleteMany(req.IDs)
 	if err != nil {

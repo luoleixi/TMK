@@ -29,7 +29,7 @@ func (a *Application) handleCreateSession(c *gin.Context) {
 	}
 
 	ses := &model.Session{
-		ID: uuid.New().String(), SourceLang: req.SourceLang, TargetLang: req.TargetLang,
+		ID: uuid.New().String(), UserID: currentUser(c).ID, SourceLang: req.SourceLang, TargetLang: req.TargetLang,
 		InputType: req.InputType, Status: "ready", CreatedAt: time.Now(),
 	}
 	if err := a.store.Create(ses); err != nil {
@@ -41,6 +41,9 @@ func (a *Application) handleCreateSession(c *gin.Context) {
 }
 
 func (a *Application) handleGetSession(c *gin.Context) {
+	if !a.requireSessionOwner(c, c.Param("id")) {
+		return
+	}
 	ses, ok, err := a.store.Get(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] get session failed: %v", err)
@@ -55,6 +58,9 @@ func (a *Application) handleGetSession(c *gin.Context) {
 }
 
 func (a *Application) handleStopSession(c *gin.Context) {
+	if !a.requireSessionOwner(c, c.Param("id")) {
+		return
+	}
 	ok, err := a.store.End(c.Param("id"))
 	if err != nil {
 		log.Printf("[db] stop session failed: %v", err)
@@ -67,6 +73,20 @@ func (a *Application) handleStopSession(c *gin.Context) {
 	}
 	a.queueSessionBrief(c.Param("id"))
 	c.JSON(200, gin.H{"code": 0, "message": "ok"})
+}
+
+func (a *Application) requireSessionOwner(c *gin.Context, sessionID string) bool {
+	ok, err := a.store.IsSessionOwner(sessionID, currentUser(c).ID)
+	if err != nil {
+		log.Printf("[db] check session owner failed: %v", err)
+		c.JSON(500, gin.H{"code": 500, "message": "session access check failed"})
+		return false
+	}
+	if !ok {
+		c.JSON(404, gin.H{"code": 404, "message": "session not found"})
+		return false
+	}
+	return true
 }
 
 func durationSeconds(ses *model.Session) int {

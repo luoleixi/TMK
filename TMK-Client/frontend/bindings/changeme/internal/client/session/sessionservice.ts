@@ -9,6 +9,16 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function AuthState(): $CancellablePromise<$models.AuthUser> {
+    return $Call.ByID(2557031078).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+export function ChangePassword(currentPassword: string, newPassword: string): $CancellablePromise<void> {
+    return $Call.ByID(2456312838, currentPassword, newPassword);
+}
+
 export function CreateSession(sourceLang: string, targetLang: string, inputType: string): $CancellablePromise<string> {
     return $Call.ByID(852100741, sourceLang, targetLang, inputType);
 }
@@ -23,15 +33,25 @@ export function DeleteHistoryBatch(ids: string[]): $CancellablePromise<number> {
 
 export function GetHistory(sessionID: string): $CancellablePromise<$models.HistoryDetail | null> {
     return $Call.ByID(884844607, sessionID).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType2($result);
     });
 }
 
 export function ListHistory(offset: number, limit: number): $CancellablePromise<[$models.HistorySession[], number]> {
     return $Call.ByID(58364749, offset, limit).then(($result: any) => {
-        $result[0] = $$createType3($result[0]);
+        $result[0] = $$createType4($result[0]);
         return $result;
     });
+}
+
+export function Login(email: string, password: string): $CancellablePromise<$models.AuthUser> {
+    return $Call.ByID(2920166472, email, password).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+export function Logout(): $CancellablePromise<void> {
+    return $Call.ByID(500262189);
 }
 
 export function PauseInterpret(): $CancellablePromise<void> {
@@ -44,7 +64,7 @@ export function ResumeInterpret(): $CancellablePromise<void> {
 
 export function SearchHistory(offset: number, limit: number, keyword: string, dateFrom: string, dateTo: string): $CancellablePromise<[$models.HistorySession[], number]> {
     return $Call.ByID(2332623437, offset, limit, keyword, dateFrom, dateTo).then(($result: any) => {
-        $result[0] = $$createType3($result[0]);
+        $result[0] = $$createType4($result[0]);
         return $result;
     });
 }
@@ -66,7 +86,8 @@ export function SummarizeHistory(sessionID: string): $CancellablePromise<string>
 }
 
 // Private type creation functions
-const $$createType0 = $models.HistoryDetail.createFrom;
-const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $models.HistorySession.createFrom;
-const $$createType3 = $Create.Array($$createType2);
+const $$createType0 = $models.AuthUser.createFrom;
+const $$createType1 = $models.HistoryDetail.createFrom;
+const $$createType2 = $Create.Nullable($$createType1);
+const $$createType3 = $models.HistorySession.createFrom;
+const $$createType4 = $Create.Array($$createType3);

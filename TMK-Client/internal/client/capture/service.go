@@ -1,9 +1,11 @@
 package capture
 
 import (
+	"fmt"
 	"log"
+	"strings"
 
-	"changeme/internal/audio"
+	"tmk-client/internal/audio"
 )
 
 type CaptureService struct {
@@ -37,8 +39,8 @@ func (s *CaptureService) ListCaptureDevices() []audio.Device {
 	return append(result, devices...)
 }
 
-// StartCapture begins audio capture.
-// Uses micDeviceID set via SetMicrophoneDevice to determine the source.
+// StartCapture begins capture for the requested source type.
+// system_audio always uses WASAPI loopback; microphone uses the selected device.
 func (s *CaptureService) StartCapture(sourceType string) error {
 	if s.capture != nil {
 		s.StopCapture()
@@ -64,7 +66,17 @@ func (s *CaptureService) StartCapture(sourceType string) error {
 		}
 	}
 
-	if s.micDeviceID == DeviceSystemAudio {
+	sourceType = strings.TrimSpace(sourceType)
+	if sourceType == "" {
+		if s.micDeviceID == DeviceSystemAudio {
+			sourceType = "system_audio"
+		} else {
+			sourceType = "microphone"
+		}
+	}
+
+	switch sourceType {
+	case "system_audio":
 		c, err := audio.StartLoopbackCapture(onData)
 		if err != nil {
 			return err
@@ -72,19 +84,21 @@ func (s *CaptureService) StartCapture(sourceType string) error {
 		s.capture = c
 		log.Printf("[capture] started, source=system_audio (WASAPI loopback)")
 		return nil
+	case "microphone":
+		deviceID := s.micDeviceID
+		if deviceID < 0 {
+			deviceID = audio.DefaultDevice().ID
+		}
+		c, err := audio.StartCapture(deviceID, onData)
+		if err != nil {
+			return err
+		}
+		s.capture = c
+		log.Printf("[capture] started, source=microphone device=%d", deviceID)
+		return nil
+	default:
+		return fmt.Errorf("unsupported capture source %q", sourceType)
 	}
-
-	deviceID := s.micDeviceID
-	if deviceID < 0 {
-		deviceID = audio.DefaultDevice().ID
-	}
-	c, err := audio.StartCapture(deviceID, onData)
-	if err != nil {
-		return err
-	}
-	s.capture = c
-	log.Printf("[capture] started, source=microphone device=%d", deviceID)
-	return nil
 }
 
 // StopCapture stops audio capture.

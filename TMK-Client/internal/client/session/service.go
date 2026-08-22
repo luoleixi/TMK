@@ -10,11 +10,14 @@ import (
 	"sync"
 	"time"
 
-	runtimeconfig "changeme/internal/client/runtime"
+	runtimeconfig "tmk-client/internal/client/runtime"
 
 	"github.com/gorilla/websocket"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// EventEmitter is the small UI boundary needed by the session client.
+// The Wails adapter is supplied by the application entry point.
+type EventEmitter func(name string, value any)
 
 type SessionService struct {
 	mu           sync.Mutex
@@ -28,14 +31,20 @@ type SessionService struct {
 	apiURL       func() string
 	webSocketURL func(string, url.Values) (string, error)
 	dialer       *websocket.Dialer
+	emit         EventEmitter
 }
 
-func NewService() *SessionService {
+func NewService(emitters ...EventEmitter) *SessionService {
+	var emit EventEmitter
+	if len(emitters) > 0 {
+		emit = emitters[0]
+	}
 	return &SessionService{
 		httpClient:   &http.Client{Timeout: 15 * time.Second},
 		apiURL:       runtimeconfig.BackendAPIURL,
 		webSocketURL: runtimeconfig.BackendWebSocketURL,
 		dialer:       websocket.DefaultDialer,
+		emit:         emit,
 	}
 }
 
@@ -141,20 +150,26 @@ func (s *SessionService) readLoop(conn *websocket.Conn, epoch uint64) {
 		}
 		switch envelope.Type {
 		case "started":
-			application.Get().Event.Emit("stream-reset", true)
+			s.emitEvent("stream-reset", true)
 		case "transcript":
 			var event TranscriptMsg
 			if err := json.Unmarshal(message, &event); err == nil {
-				application.Get().Event.Emit("transcript", event)
+				s.emitEvent("transcript", event)
 			}
 		case "translation":
 			var event TranslationMsg
 			if err := json.Unmarshal(message, &event); err == nil {
-				application.Get().Event.Emit("translation", event)
+				s.emitEvent("translation", event)
 			}
 		case "error":
 			log.Printf("[ws] error: %s", message)
 		}
+	}
+}
+
+func (s *SessionService) emitEvent(name string, value any) {
+	if s.emit != nil {
+		s.emit(name, value)
 	}
 }
 

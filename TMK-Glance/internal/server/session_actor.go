@@ -47,6 +47,7 @@ type sessionActor struct {
 	droppedAudioCnt  atomic.Int64
 	droppedSendCount atomic.Int64
 	seq              int64
+	paused           bool
 }
 
 // providerStream preserves provider sentence boundaries when local segmentation
@@ -166,7 +167,7 @@ func (a *sessionActor) cleanup() {
 }
 
 func (a *sessionActor) handleAudio(msg []byte) {
-	if a.audioCh == nil {
+	if a.audioCh == nil || a.paused {
 		return
 	}
 	select {
@@ -194,6 +195,20 @@ func (a *sessionActor) handleControl(msgType string) bool {
 		})
 	case "ping":
 		a.writeJSON(gin.H{"type": "pong", "timestamp_ms": time.Now().UnixMilli()})
+	case "pause":
+		if a.asrEngine == nil {
+			a.writeJSON(gin.H{"type": "error", "message": "session not started"})
+			break
+		}
+		a.paused = true
+		a.writeJSON(gin.H{"type": "paused", "timestamp_ms": time.Now().UnixMilli()})
+	case "resume":
+		if a.asrEngine == nil {
+			a.writeJSON(gin.H{"type": "error", "message": "session not started"})
+			break
+		}
+		a.paused = false
+		a.writeJSON(gin.H{"type": "resumed", "timestamp_ms": time.Now().UnixMilli()})
 	case "stop":
 		a.stopPipeline()
 		a.writeJSON(gin.H{"type": "stopped", "timestamp_ms": time.Now().UnixMilli()})
@@ -205,6 +220,7 @@ func (a *sessionActor) handleControl(msgType string) bool {
 }
 
 func (a *sessionActor) startInterpret() {
+	a.paused = false
 	ok, err := a.store.Activate(a.sessionID)
 	if err != nil {
 		log.Printf("[db] activate session failed: %v", err)
@@ -311,6 +327,7 @@ func (a *sessionActor) publishSegments(segments []segmenter.Segment, scheduler *
 }
 
 func (a *sessionActor) stopPipeline() {
+	a.paused = false
 	if a.asrEngine == nil && a.scheduler == nil {
 		return
 	}

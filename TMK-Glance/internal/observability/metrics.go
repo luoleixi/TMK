@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 	"tmk-glance/internal/buildinfo"
+	"unicode/utf8"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"

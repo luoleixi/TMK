@@ -157,6 +157,10 @@ jobs:
         with:
           name: tmk-admin-api-production
           path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: tmk-admin-api-production
+          path: dist
       - name: Build Linux server
         working-directory: TMK-Glance
         env:

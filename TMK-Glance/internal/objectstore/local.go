@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 var ErrTooLarge = errors.New("object exceeds size limit")
@@ -106,19 +105,12 @@ func (s *Local) Delete(key string) error {
 	return err
 }
 
-func (s *Local) FreeBytes() (uint64, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(s.root, &stat); err != nil {
-		return 0, err
-	}
-	return uint64(stat.Bavail) * uint64(stat.Bsize), nil
-}
-
 func (s *Local) resolve(key string) (string, error) {
-	key = filepath.ToSlash(strings.TrimSpace(key))
+	key = strings.TrimSpace(key)
 	if key == "" || strings.HasPrefix(key, "/") || strings.Contains(key, "\\") {
 		return "", errors.New("invalid object key")
 	}
+	key = filepath.ToSlash(key)
 	clean := filepath.Clean(filepath.FromSlash(key))
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", errors.New("invalid object key")

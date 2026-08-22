@@ -50,6 +50,7 @@ func (c *GlanceClient) Do(ctx context.Context, method, path string, body io.Read
 		request.Header = make(http.Header)
 	}
 	request.Header.Set("X-Request-ID", requestID)
+	request.Header.Set("X-Trace-ID", requestID)
 	request.Header.Set("X-Admin-API", "tmk-admin-api")
 	if c.secret != "" {
 		timestamp := time.Now().UTC().Format(time.RFC3339)

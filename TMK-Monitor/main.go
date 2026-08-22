@@ -236,6 +236,7 @@ func (s *server) summary(w http.ResponseWriter, r *http.Request) {
 		"http_p95_seconds":       `histogram_quantile(0.95, sum by (le) (rate(tmk_http_request_duration_seconds_bucket` + scope + `[5m])))`,
 		"asr_error_rate":         `sum(rate(tmk_asr_requests_total{outcome="error",environment="` + s.cfg.Environment + `"}[10m])) / clamp_min(sum(rate(tmk_asr_requests_total{outcome=~"success|error",environment="` + s.cfg.Environment + `"}[10m])), 0.001)`,
 		"translation_error_rate": `sum(rate(tmk_translation_requests_total{outcome=~"fallback|error",environment="` + s.cfg.Environment + `"}[10m])) / clamp_min(sum(rate(tmk_translation_requests_total` + scope + `[10m])), 0.001)`,
+		"model_tokens_per_second": `sum(rate(tmk_model_tokens_total` + scope + `[5m]))`,
 		"evaluation_queued":      `tmk_evaluation_jobs_queued` + scope,
 		"evaluation_running":     `tmk_evaluation_jobs_running` + scope,
 		"database_in_use":        `tmk_db_in_use_connections` + scope,

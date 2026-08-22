@@ -31,8 +31,31 @@ func (c InboxConsumer) Process(message OutboxMessage, handler func(OutboxMessage
 }
 
 func migrateOutboxMySQL(db *sql.DB) error {
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS event_outbox (id VARCHAR(36) PRIMARY KEY,topic VARCHAR(100) NOT NULL,aggregate_id VARCHAR(64) NOT NULL,payload JSON NOT NULL,attempts INT NOT NULL DEFAULT 0,available_at DATETIME(6) NOT NULL,published_at DATETIME(6) NULL,created_at DATETIME(6) NOT NULL,INDEX idx_outbox_available(available_at,published_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4; CREATE TABLE IF NOT EXISTS event_inbox (consumer VARCHAR(100) NOT NULL,event_id VARCHAR(36) NOT NULL,processed_at DATETIME(6) NOT NULL,PRIMARY KEY(consumer,event_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
-	return err
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS event_outbox (
+			id VARCHAR(36) PRIMARY KEY,
+			topic VARCHAR(100) NOT NULL,
+			aggregate_id VARCHAR(64) NOT NULL,
+			payload JSON NOT NULL,
+			attempts INT NOT NULL DEFAULT 0,
+			available_at DATETIME(6) NOT NULL,
+			published_at DATETIME(6) NULL,
+			created_at DATETIME(6) NOT NULL,
+			INDEX idx_outbox_available(available_at,published_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS event_inbox (
+			consumer VARCHAR(100) NOT NULL,
+			event_id VARCHAR(36) NOT NULL,
+			processed_at DATETIME(6) NOT NULL,
+			PRIMARY KEY(consumer,event_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (s *SessionStore) EnqueueOutbox(topic, aggregateID string, payload any) error {
 	data, err := json.Marshal(payload)

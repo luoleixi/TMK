@@ -1,6 +1,8 @@
 package segmenter
 
 import (
+	"context"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -12,16 +14,27 @@ const (
 	ReasonPunctuation   = "punctuation"
 	ReasonMaxLength     = "max_length"
 	ReasonMaxDuration   = "max_duration"
+	ReasonPause         = "pause"
+	ReasonSemantic      = "semantic"
+	ReasonFallback      = "fallback"
 	ReasonProviderFinal = "provider_final"
 	ReasonSoftCommit    = "soft_commit"
 	ReasonFlush         = "flush"
 )
 
 type Config struct {
-	Enabled         bool
-	MaxRunes        int
-	MaxDuration     time.Duration
-	SoftCommitDelay time.Duration
+	Enabled             bool
+	MaxRunes            int
+	MaxDuration         time.Duration
+	SoftCommitDelay     time.Duration
+	MinRunes            int
+	MinDuration         time.Duration
+	StableRevisionCount int
+	PunctuationEnabled  bool
+	SemanticEnabled     bool
+	SemanticTimeout     time.Duration
+	SemanticProvider    string
+	BoundaryPolicy      string
 }
 
 type Input struct {
@@ -29,14 +42,78 @@ type Input struct {
 	IsFinal     bool
 	BeginTimeMS int64
 	EndTimeMS   int64
+	Confidence  float64
+	Provider    string
 }
 
 type Segment struct {
-	ID       int64  `json:"id"`
-	Revision int64  `json:"revision"`
-	Text     string `json:"text"`
-	IsFinal  bool   `json:"is_final"`
-	Reason   string `json:"reason"`
+	ID            int64   `json:"id"`
+	Revision      int64   `json:"revision"`
+	Text          string  `json:"text"`
+	IsFinal       bool    `json:"is_final"`
+	Reason        string  `json:"reason"`
+	BeginTimeMS   int64   `json:"begin_time_ms,omitempty"`
+	EndTimeMS     int64   `json:"end_time_ms,omitempty"`
+	BoundaryScore float64 `json:"boundary_score,omitempty"`
+	Strategy      string  `json:"strategy,omitempty"`
+	Stability     string  `json:"stability,omitempty"`
+}
+
+type SemanticInput struct {
+	Language      string
+	Text          string
+	CandidateCuts []int
+	PreviousText  string
+	MaxRunes      int
+}
+
+type SemanticDecision struct {
+	Boundaries []int
+	Confidence float64
+	Reason     string
+}
+
+// SemanticSegmenter is intentionally caller-owned. Real-time callers may run it
+// asynchronously; the core state machine never waits on a provider.
+type SemanticSegmenter interface {
+	Suggest(context.Context, SemanticInput) (SemanticDecision, error)
+}
+
+// ApplySemanticDecision applies a decision produced asynchronously by a
+// SemanticSegmenter. Callers must serialize it with Push/Tick/Flush and may
+// discard decisions whose input revision is no longer current.
+func (s *Segmenter) ApplySemanticDecision(decision SemanticDecision, now time.Time) []Segment {
+	combined := []rune(joinText(s.carry, s.provider))
+	if s.consumed >= len(combined) || len(decision.Boundaries) == 0 {
+		return nil
+	}
+	boundaries := append([]int(nil), decision.Boundaries...)
+	sort.Ints(boundaries)
+	output := make([]Segment, 0, len(boundaries))
+	start := s.consumed
+	for _, cut := range boundaries {
+		if cut <= start || cut > len(combined) || cut-start < s.config.MinRunes {
+			continue
+		}
+		text := strings.TrimSpace(string(combined[start:cut]))
+		if text == "" {
+			continue
+		}
+		score := decision.Confidence
+		if score <= 0 {
+			score = 0.70
+		}
+		if score > 1 {
+			score = 1
+		}
+		output = append(output, s.emitFinal(text, ReasonSemantic, now, score, "semantic"))
+		start = cut
+	}
+	s.consumed = start
+	if s.consumed >= len(combined) {
+		s.resetProviderState()
+	}
+	return output
 }
 
 type pendingSegment struct {
@@ -50,15 +127,17 @@ type pendingSegment struct {
 type Segmenter struct {
 	config Config
 
-	segmentID int64
-	revision  int64
-	carry     string
-	provider  string
-	previous  string
-	consumed  int
-	lastText  string
-	startedAt time.Time
-	pending   *pendingSegment
+	segmentID   int64
+	revision    int64
+	carry       string
+	provider    string
+	previous    string
+	consumed    int
+	lastText    string
+	startedAt   time.Time
+	beginTimeMS int64
+	endTimeMS   int64
+	pending     *pendingSegment
 }
 
 func New(config Config) *Segmenter {
@@ -70,6 +149,21 @@ func New(config Config) *Segmenter {
 	}
 	if config.SoftCommitDelay <= 0 {
 		config.SoftCommitDelay = 300 * time.Millisecond
+	}
+	if config.MinRunes <= 0 {
+		config.MinRunes = 1
+	}
+	if config.MinDuration < 0 {
+		config.MinDuration = 0
+	}
+	if config.SemanticTimeout <= 0 {
+		config.SemanticTimeout = 200 * time.Millisecond
+	}
+	if config.BoundaryPolicy == "" {
+		config.BoundaryPolicy = "balanced"
+	}
+	if config.PunctuationEnabled == false {
+		config.PunctuationEnabled = true
 	}
 	return &Segmenter{config: config, segmentID: 1}
 }
@@ -96,6 +190,12 @@ func (s *Segmenter) Push(input Input, now time.Time) []Segment {
 	}
 
 	s.provider = text
+	if input.BeginTimeMS > 0 && s.beginTimeMS == 0 {
+		s.beginTimeMS = input.BeginTimeMS
+	}
+	if input.EndTimeMS > s.endTimeMS {
+		s.endTimeMS = input.EndTimeMS
+	}
 	combined := joinText(s.carry, s.provider)
 	combinedRunes := []rune(combined)
 	if s.consumed > len(combinedRunes) {
@@ -116,19 +216,21 @@ func (s *Segmenter) Push(input Input, now time.Time) []Segment {
 		if stableWindow > s.config.MaxRunes {
 			stableWindow = s.config.MaxRunes
 		}
-		if boundary := punctuationBoundary(remainder, stableWindow); boundary > 0 {
-			output = append(output, s.emitFinal(string(remainder[:boundary]), ReasonPunctuation, now))
-			s.consumed += boundary
-			continue
+		if s.config.PunctuationEnabled {
+			if boundary := punctuationBoundary(remainder, stableWindow); boundary > 0 && s.boundaryAllowed(boundary) {
+				output = append(output, s.emitFinal(string(remainder[:boundary]), ReasonPunctuation, now, 0.95, "rule"))
+				s.consumed += boundary
+				continue
+			}
 		}
 		if len(remainder) > s.config.MaxRunes {
 			cut := preferredBoundary(remainder, s.config.MaxRunes)
-			output = append(output, s.emitFinal(string(remainder[:cut]), ReasonMaxLength, now))
+			output = append(output, s.emitFinal(string(remainder[:cut]), ReasonMaxLength, now, 0.35, "fallback"))
 			s.consumed += cut
 			continue
 		}
 		if s.durationExceeded(input, now) {
-			output = append(output, s.emitFinal(string(remainder), ReasonMaxDuration, now))
+			output = append(output, s.emitFinal(string(remainder), ReasonMaxDuration, now, 0.35, "fallback"))
 			s.consumed = len(combinedRunes)
 			continue
 		}
@@ -139,7 +241,7 @@ func (s *Segmenter) Push(input Input, now time.Time) []Segment {
 		remainder := strings.TrimSpace(string(combinedRunes[s.consumed:]))
 		if input.IsFinal {
 			if hasTerminalPunctuation(remainder) {
-				output = append(output, s.emitFinal(remainder, ReasonProviderFinal, now))
+				output = append(output, s.emitFinal(remainder, ReasonProviderFinal, now, 0.90, "rule"))
 				s.consumed = len(combinedRunes)
 			} else {
 				output = append(output, s.emitPartial(remainder)...)
@@ -180,7 +282,7 @@ func (s *Segmenter) Flush(now time.Time) []Segment {
 	if text == "" {
 		return nil
 	}
-	return []Segment{s.emitFinal(text, ReasonFlush, now)}
+	return []Segment{s.emitFinal(text, ReasonFlush, now, 0.20, "fallback")}
 }
 
 func (s *Segmenter) emitPartial(text string) []Segment {
@@ -190,17 +292,18 @@ func (s *Segmenter) emitPartial(text string) []Segment {
 	}
 	s.revision++
 	s.lastText = text
-	return []Segment{{ID: s.segmentID, Revision: s.revision, Text: text, Reason: ReasonPartial}}
+	return []Segment{{ID: s.segmentID, Revision: s.revision, Text: text, Reason: ReasonPartial, BeginTimeMS: s.beginTimeMS, EndTimeMS: s.endTimeMS, Stability: "partial", Strategy: "rule"}}
 }
 
-func (s *Segmenter) emitFinal(text, reason string, now time.Time) Segment {
+func (s *Segmenter) emitFinal(text, reason string, now time.Time, score float64, strategy string) Segment {
 	text = strings.TrimSpace(text)
 	s.revision++
-	result := Segment{ID: s.segmentID, Revision: s.revision, Text: text, IsFinal: true, Reason: reason}
+	result := Segment{ID: s.segmentID, Revision: s.revision, Text: text, IsFinal: true, Reason: reason, BeginTimeMS: s.beginTimeMS, EndTimeMS: s.endTimeMS, BoundaryScore: score, Strategy: strategy, Stability: "final"}
 	s.segmentID++
 	s.revision = 0
 	s.lastText = ""
 	s.startedAt = now
+	s.beginTimeMS, s.endTimeMS = 0, 0
 	return result
 }
 
@@ -210,10 +313,14 @@ func (s *Segmenter) commitPending(reason string) []Segment {
 	}
 	text := s.pending.text
 	s.pending = nil
-	result := s.emitFinal(text, reason, time.Time{})
+	result := s.emitFinal(text, reason, time.Time{}, 0.60, "rule")
 	s.resetProviderState()
 	s.startedAt = time.Time{}
 	return []Segment{result}
+}
+
+func (s *Segmenter) boundaryAllowed(cut int) bool {
+	return cut >= s.config.MinRunes && (s.config.MinDuration == 0 || s.endTimeMS-s.beginTimeMS >= s.config.MinDuration.Milliseconds())
 }
 
 func (s *Segmenter) resetProviderState() {

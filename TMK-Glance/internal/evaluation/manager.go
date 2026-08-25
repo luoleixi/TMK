@@ -424,7 +424,8 @@ func (m *Manager) processItem(ctx context.Context, job *model.EvaluationJob, ite
 
 	stream := segmenter.New(segmenter.Config{Enabled: job.Config.SegmenterEnabled, MaxRunes: job.Config.MaxRunes,
 		MaxDuration:     time.Duration(job.Config.MaxDurationMS) * time.Millisecond,
-		SoftCommitDelay: time.Duration(job.Config.SoftCommitDelayMS) * time.Millisecond})
+		SoftCommitDelay: time.Duration(job.Config.SoftCommitDelayMS) * time.Millisecond,
+		MinRunes:        job.Config.MinRunes, SemanticEnabled: job.Config.SemanticEnabled})
 	var finalASR []string
 	var lastPartial string
 	segments := make([]segmenter.Segment, 0)

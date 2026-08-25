@@ -52,10 +52,13 @@ func (a *Application) handleInterpret(c *gin.Context) {
 
 	logger.Info("websocket connected")
 	actor := newSessionActor(conn, sessionID, a.store, a.translator, segmenter.Config{
-		Enabled:         a.cfg.ASR.Segmenter.Enabled,
-		MaxRunes:        a.cfg.ASR.Segmenter.MaxRunes,
-		MaxDuration:     time.Duration(a.cfg.ASR.Segmenter.MaxDurationMS) * time.Millisecond,
-		SoftCommitDelay: time.Duration(a.cfg.ASR.Segmenter.SoftCommitDelayMS) * time.Millisecond,
+		Enabled:            a.cfg.ASR.Segmenter.Enabled,
+		MaxRunes:           a.cfg.ASR.Segmenter.MaxRunes,
+		MaxDuration:        time.Duration(a.cfg.ASR.Segmenter.MaxDurationMS) * time.Millisecond,
+		SoftCommitDelay:    time.Duration(a.cfg.ASR.Segmenter.SoftCommitDelayMS) * time.Millisecond,
+		MinRunes:           a.cfg.ASR.Segmenter.MinRunes,
+		PunctuationEnabled: a.cfg.ASR.Segmenter.PunctuationEnabled,
+		SemanticEnabled:    a.cfg.ASR.Segmenter.SemanticEnabled,
 	}, a.asrFactory, a.queueSessionBrief, a.metrics)
 	actor.logger = logger
 	actor.run()

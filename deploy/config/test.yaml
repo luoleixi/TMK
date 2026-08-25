@@ -54,6 +54,10 @@ asr:
     max_runes: 40
     max_duration_ms: 5000
     soft_commit_delay_ms: 300
+    min_runes: 1
+    punctuation_enabled: true
+    semantic_enabled: false
+    version: rule-v2
 
 translator:
   provider: bailian

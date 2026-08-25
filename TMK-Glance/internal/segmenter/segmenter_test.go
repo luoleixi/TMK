@@ -117,3 +117,31 @@ func TestFinalPunctuationCannotBypassMaxRunes(t *testing.T) {
 		t.Fatalf("final punctuation bypassed max runes: %+v", output)
 	}
 }
+
+func TestSegmentsCarryTimingAndExplainFallback(t *testing.T) {
+	s := New(Config{MaxRunes: 4, MaxDuration: time.Hour, SoftCommitDelay: time.Second})
+	output := s.Push(Input{Text: "一二三四五", BeginTimeMS: 120, EndTimeMS: 620}, time.Now())
+	if len(output) != 2 {
+		t.Fatalf("unexpected output: %+v", output)
+	}
+	if output[0].BeginTimeMS != 120 || output[0].EndTimeMS != 620 || output[0].Strategy != "fallback" || output[0].Reason != ReasonMaxLength {
+		t.Fatalf("missing timing or strategy metadata: %+v", output[0])
+	}
+}
+
+func TestPunctuationBoundaryHasHighRuleScore(t *testing.T) {
+	s := New(Config{MaxRunes: 20, MaxDuration: time.Hour, SoftCommitDelay: time.Second})
+	output := s.Push(Input{Text: "你好。", IsFinal: true, BeginTimeMS: 10, EndTimeMS: 500}, time.Now())
+	if len(output) != 1 || output[0].BoundaryScore < 0.85 || output[0].Strategy != "rule" || output[0].Stability != "final" {
+		t.Fatalf("unexpected boundary metadata: %+v", output)
+	}
+}
+
+func TestSemanticDecisionAppliesOnlyValidCurrentCuts(t *testing.T) {
+	s := New(Config{MaxRunes: 20, MaxDuration: time.Hour, SoftCommitDelay: time.Second})
+	s.Push(Input{Text: "今天下午开会然后评测", BeginTimeMS: 10, EndTimeMS: 1000}, time.Now())
+	output := s.ApplySemanticDecision(SemanticDecision{Boundaries: []int{4, 999}, Confidence: 0.91}, time.Now())
+	if len(output) != 1 || output[0].Reason != ReasonSemantic || output[0].Strategy != "semantic" || output[0].Text != "今天下午" {
+		t.Fatalf("unexpected semantic output: %+v", output)
+	}
+}

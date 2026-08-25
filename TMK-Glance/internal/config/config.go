@@ -64,10 +64,14 @@ type Config struct {
 			PunctuationPredictionEnabled bool   `yaml:"punctuation_prediction_enabled"`
 		} `yaml:"bailian"`
 		Segmenter struct {
-			Enabled           bool `yaml:"enabled"`
-			MaxRunes          int  `yaml:"max_runes"`
-			MaxDurationMS     int  `yaml:"max_duration_ms"`
-			SoftCommitDelayMS int  `yaml:"soft_commit_delay_ms"`
+			Enabled            bool   `yaml:"enabled"`
+			MaxRunes           int    `yaml:"max_runes"`
+			MaxDurationMS      int    `yaml:"max_duration_ms"`
+			SoftCommitDelayMS  int    `yaml:"soft_commit_delay_ms"`
+			MinRunes           int    `yaml:"min_runes"`
+			PunctuationEnabled bool   `yaml:"punctuation_enabled"`
+			SemanticEnabled    bool   `yaml:"semantic_enabled"`
+			Version            string `yaml:"version"`
 		} `yaml:"segmenter"`
 	} `yaml:"asr"`
 	Translator struct {
@@ -119,6 +123,9 @@ func Load(path string) (*Config, error) {
 	cfg.ASR.Segmenter.Enabled = true
 	cfg.ASR.Segmenter.MaxDurationMS = 5000
 	cfg.ASR.Segmenter.SoftCommitDelayMS = 300
+	cfg.ASR.Segmenter.MinRunes = 1
+	cfg.ASR.Segmenter.PunctuationEnabled = true
+	cfg.ASR.Segmenter.Version = "rule-v2"
 	cfg.Translator.Provider = "mock"
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {

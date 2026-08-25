@@ -25,6 +25,10 @@ type EvaluationConfig struct {
 	MaxRunes                     int    `json:"max_runes"`
 	MaxDurationMS                int    `json:"max_duration_ms"`
 	SoftCommitDelayMS            int    `json:"soft_commit_delay_ms"`
+	SegmenterVersion             string `json:"segmenter_version"`
+	SegmenterStrategy            string `json:"segmenter_strategy"`
+	MinRunes                     int    `json:"min_runes"`
+	SemanticEnabled              bool   `json:"semantic_enabled"`
 }
 
 type EvaluationJob struct {

@@ -52,6 +52,8 @@ func (a *Application) handleCreateEvaluationJob(c *gin.Context) {
 		MaxRunes          int    `json:"max_runes"`
 		MaxDurationMS     int    `json:"max_duration_ms"`
 		SoftCommitDelayMS int    `json:"soft_commit_delay_ms"`
+		MinRunes          int    `json:"min_runes"`
+		SemanticEnabled   *bool  `json:"semantic_enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.DatasetID) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "dataset_id is required"})
@@ -64,7 +66,12 @@ func (a *Application) handleCreateEvaluationJob(c *gin.Context) {
 	maxRunes := defaultInt(req.MaxRunes, a.cfg.ASR.Segmenter.MaxRunes)
 	maxDuration := defaultInt(req.MaxDurationMS, a.cfg.ASR.Segmenter.MaxDurationMS)
 	softDelay := defaultInt(req.SoftCommitDelayMS, a.cfg.ASR.Segmenter.SoftCommitDelayMS)
-	if maxRunes < 1 || maxRunes > 500 || maxDuration < 100 || maxDuration > 60000 || softDelay < 10 || softDelay > 10000 {
+	minRunes := defaultInt(req.MinRunes, a.cfg.ASR.Segmenter.MinRunes)
+	semanticEnabled := a.cfg.ASR.Segmenter.SemanticEnabled
+	if req.SemanticEnabled != nil {
+		semanticEnabled = *req.SemanticEnabled
+	}
+	if maxRunes < 1 || maxRunes > 500 || minRunes < 1 || minRunes > maxRunes || maxDuration < 100 || maxDuration > 60000 || softDelay < 10 || softDelay > 10000 {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "invalid segmenter configuration"})
 		return
 	}
@@ -77,6 +84,10 @@ func (a *Application) handleCreateEvaluationJob(c *gin.Context) {
 			MultiThresholdModeEnabled:    a.cfg.ASR.Bailian.MultiThresholdModeEnabled,
 			PunctuationPredictionEnabled: a.cfg.ASR.Bailian.PunctuationPredictionEnabled,
 			MaxRunes:                     maxRunes, MaxDurationMS: maxDuration, SoftCommitDelayMS: softDelay}}
+	job.Config.MinRunes = minRunes
+	job.Config.SemanticEnabled = semanticEnabled
+	job.Config.SegmenterVersion = a.cfg.ASR.Segmenter.Version
+	job.Config.SegmenterStrategy = "hybrid"
 	if err := a.store.CreateEvaluationJob(job); err != nil {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):

@@ -360,15 +360,24 @@ func (a *sessionActor) publishSegments(segments []segmenter.Segment, scheduler *
 		a.seq++
 		seq := a.seq
 		a.writeJSON(gin.H{
-			"type":       "transcript",
-			"seq":        seq,
-			"segment_id": result.ID,
-			"revision":   result.Revision,
-			"text":       result.Text,
-			"is_final":   result.IsFinal,
-			"reason":     result.Reason,
-			"timestamp":  time.Now().UnixMilli(),
+			"type":           "transcript",
+			"seq":            seq,
+			"segment_id":     result.ID,
+			"revision":       result.Revision,
+			"text":           result.Text,
+			"is_final":       result.IsFinal,
+			"reason":         result.Reason,
+			"begin_time_ms":  result.BeginTimeMS,
+			"end_time_ms":    result.EndTimeMS,
+			"boundary_score": result.BoundaryScore,
+			"strategy":       result.Strategy,
+			"stability":      result.Stability,
+			"timestamp":      time.Now().UnixMilli(),
 		})
+		if a.metrics != nil {
+			duration := time.Duration(result.EndTimeMS-result.BeginTimeMS) * time.Millisecond
+			a.metrics.Segment(result.Strategy, result.Reason, !result.IsFinal, duration)
+		}
 		scheduler.submit(translationJob{
 			Seq: seq, SegmentID: result.ID, Revision: result.Revision,
 			Text: result.Text, IsFinal: result.IsFinal, Reason: result.Reason,

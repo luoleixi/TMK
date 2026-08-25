@@ -1,4 +1,6 @@
-# TMK — 同声传译系统
+# TMK — 同声传译与语音评测平台
+
+TMK 覆盖实时音频接入、ASR、翻译、分段、CER/WER 评测、异步任务、管理后台和带外故障排查。
 
 ## 演示视频
 
@@ -10,7 +12,7 @@
 
 ## 项目介绍
 
-TMK 是一个实时同声传译桌面应用，支持将麦克风或系统音频实时识别（ASR）并翻译为目标语言，适用于跨语言会议、视频通话、外语学习等场景。
+TMK 是一个由桌面客户端、核心业务服务、管理控制面和独立观测面组成的实时同声传译平台。当前测试环境为单机多进程部署，服务边界按未来多节点迁移设计。
 
 > 部分代码来源于本人之前的项目 [MiniTMKAgent](https://github.com/luoleixi/MiniTMKAgent)。
 
@@ -37,11 +39,11 @@ TMK 是一个实时同声传译桌面应用，支持将麦克风或系统音频�
 | 组件 | 技术 |
 |------|------|
 | 后端框架 | Go + Gin |
-| 数据库 | MySQL（SQLite 用于本地开发与测试） |
+| 数据库 | MySQL（测试、生产和 Admin API 使用隔离数据库） |
 | 实时通信 | Gorilla WebSocket |
 | 桌面框架 | Wails v3 |
 | 前端 UI | React 18 + TypeScript + Vite |
-| Web 管理后台 | React 18 + TypeScript + Vite，静态资源内嵌 Go 服务 |
+| Web 管理后台 | React 18 + TypeScript + Vite，独立静态资源部署 |
 | 音频采集 | Windows WaveIn / WASAPI (go-wca) |
 | ASR 引擎 | 阿里云百炼 paraformer-realtime-v2 |
 | 翻译引擎 | 阿里云百炼 qwen-turbo |
@@ -55,7 +57,6 @@ TMK 是一个实时同声传译桌面应用，支持将麦克风或系统音频�
 | [gin-gonic/gin](https://github.com/gin-gonic/gin) | HTTP Web 框架，路由与中间件 |
 | [gorilla/websocket](https://github.com/gorilla/websocket) | WebSocket 实现，实时双向通信 |
 | [go-sql-driver/mysql](https://github.com/go-sql-driver/mysql) | 生产环境 MySQL 驱动 |
-| [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | 本地开发与测试存储，无需 CGO |
 | [google/uuid](https://github.com/google/uuid) | UUID 生成，会话唯一标识 |
 | [gopkg.in/yaml.v3](https://gopkg.in/yaml.v3) | YAML 配置文件解析 |
 
@@ -80,6 +81,20 @@ TMK 是一个实时同声传译桌面应用，支持将麦克风或系统音频�
     → 翻译引擎翻译 → WebSocket 返回结果
     → 客户端实时展示字幕 + 持久化存储
 ```
+
+## 服务边界
+
+| 服务 | 测试端口 | 生产端口 | 职责 |
+|---|---:|---:|---|
+| Glance | 18080 | 8080 | 核心业务、实时会话、评测执行 |
+| Admin API | 18180 | 28180 | 用户、权限、管理操作、审计 |
+| Monitor API | 19090 | 29090 | 带外监控、故障定位、应急访问 |
+| Prometheus | 9090 | 共用 | 指标采集和规则计算 |
+| Alertmanager | 9093 | 共用 | 告警分组和通知 |
+
+测试管理后台：`https://117.72.159.185/tmk-test/admin/`。
+
+测试监控应急页：`https://117.72.159.185/tmk-test/monitoring/emergency/`。
 
 ## 未来规划
 

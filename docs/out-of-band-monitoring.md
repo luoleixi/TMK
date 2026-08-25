@@ -4,7 +4,7 @@
 
 监控平面不使用 Admin API 的登录、会话、权限库或业务数据库。Glance、Admin API 或管理站点不可用时，运维人员仍可从 Monitor API 自带的应急页面查看故障信息。
 
-当前组件部署在同一台服务器，但使用独立进程、端口、配置、凭据与数据目录。未来迁移只需将 Prometheus、Alertmanager、Vector 和 Monitor API 移到独立节点，并修改抓取目标及 Nginx 上游。
+当前组件部署在同一台服务器，但使用独立进程、端口、配置、凭据与数据目录。测试环境已经运行独立 Admin API、Monitor API、Prometheus 和 Alertmanager；未来迁移只需将这些组件移到独立节点，并修改抓取目标及 Nginx 上游。
 
 ## 组件边界
 

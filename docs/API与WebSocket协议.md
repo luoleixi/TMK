@@ -62,6 +62,15 @@
 
 ### 3.1 健康检查
 
+以下接口由 Glance 提供核心业务服务的存活和就绪状态。管理与监控服务使用独立健康接口，不能用 Glance 的健康结果代替。
+
+| 服务 | 存活 | 就绪 | 依赖诊断 |
+| --- | --- | --- | --- |
+| Admin API | `/api/health/live` | `/api/health/ready` | `/api/health/dependencies` |
+| Monitor API | `/api/health/live` | `/api/health/ready` | `/api/health/dependencies` |
+
+Admin API 的登录接口为 `POST /api/v1/auth/login`，请求体必须是 JSON；直接在浏览器地址栏打开该地址不会产生登录页面。
+
 ```http
 GET /api/health
 ```

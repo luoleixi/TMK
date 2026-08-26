@@ -2,6 +2,7 @@ package evaluation
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -215,6 +216,24 @@ func (m *Manager) runJob(job *model.EvaluationJob, workerID string) {
 		cancel(nil)
 		<-heartbeatDone
 	}()
+	runLeaseDone := make(chan struct{})
+	if job.RunID != "" && job.Variant == "segmenter_on" {
+		_, claimed, err := m.store.ClaimEvaluationRun(job.RunID, workerID, time.Now().UTC(), m.config.LeaseDuration)
+		if err != nil {
+			outcome = m.retryAttempt(job.ID, workerID, "claim evaluation run lease failed: "+err.Error())
+			return
+		}
+		if !claimed {
+			outcome = model.EvaluationJobRunning
+			return
+		}
+		go m.runHeartbeat(ctx, cancel, job.RunID, workerID, runLeaseDone)
+		defer func() {
+			cancel(nil)
+			<-runLeaseDone
+			_, _ = m.store.ReleaseEvaluationRun(job.RunID, workerID, time.Now().UTC())
+		}()
+	}
 
 	items, err := m.store.ListEvaluationWorkItems(job.DatasetID)
 	if err != nil {
@@ -267,6 +286,16 @@ func (m *Manager) runJob(job *model.EvaluationJob, workerID string) {
 			return
 		}
 	}
+	if job.RunID != "" && job.Variant == "segmenter_on" {
+		if err := m.runABVariant(ctx, job, items, workerID); err != nil {
+			outcome = m.retryAttempt(job.ID, workerID, err.Error())
+			return
+		}
+		if err := m.store.AggregateEvaluationRun(job.RunID, time.Now().UTC()); err != nil {
+			outcome = m.retryAttempt(job.ID, workerID, "aggregate evaluation run failed: "+err.Error())
+			return
+		}
+	}
 	finished, err := m.store.FinishEvaluationJob(job.ID, workerID, false, "", time.Now().UTC())
 	if err != nil || !finished {
 		if err != nil && !errors.Is(err, store.ErrLeaseLost) {
@@ -277,6 +306,55 @@ func (m *Manager) runJob(job *model.EvaluationJob, workerID string) {
 	if outcome != model.EvaluationJobCompletedWithErrors {
 		outcome = model.EvaluationJobSucceeded
 	}
+}
+
+func (m *Manager) runABVariant(ctx context.Context, primary *model.EvaluationJob, items []model.EvaluationWorkItem, workerID string) error {
+	jobs, err := m.store.ListEvaluationRunJobs(primary.RunID)
+	if err != nil {
+		return err
+	}
+	var variant *model.EvaluationJob
+	for i := range jobs {
+		if jobs[i].Variant == "segmenter_off" {
+			variant = &jobs[i]
+			break
+		}
+	}
+	if variant == nil {
+		return errors.New("paired segmenter_off job is missing")
+	}
+	if variant.Status == model.EvaluationJobSucceeded || variant.Status == model.EvaluationJobCompletedWithErrors {
+		return nil
+	}
+	variant, ok, err := m.store.ActivateEvaluationJob(variant.ID, workerID, time.Now().UTC(), m.config.LeaseDuration)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("paired segmenter_off job is already claimed")
+	}
+	completed, err := m.store.CompletedEvaluationItemIDs(variant.ID)
+	if err != nil {
+		return err
+	}
+	outcomeErr := false
+	for _, item := range items {
+		if completed[item.DatasetItemID] {
+			continue
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		result := m.evaluateItem(ctx, variant, item)
+		if result.Status == model.EvaluationResultFailed {
+			outcomeErr = true
+		}
+		if err := m.store.SaveEvaluationResult(result, workerID, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	_, err = m.store.FinishEvaluationJob(variant.ID, workerID, outcomeErr, "", time.Now().UTC())
+	return err
 }
 
 func (m *Manager) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, job *model.EvaluationJob, workerID string, done chan<- struct{}) {
@@ -302,6 +380,30 @@ func (m *Manager) heartbeat(ctx context.Context, cancel context.CancelCauseFunc,
 				return
 			}
 			log.Printf("[evaluation] heartbeat failed job=%s: %v", job.ID, err)
+		}
+	}
+}
+
+func (m *Manager) runHeartbeat(ctx context.Context, cancel context.CancelCauseFunc, runID, workerID string, done chan<- struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(m.config.HeartbeatInterval)
+	defer ticker.Stop()
+	leaseExpires := time.Now().Add(m.config.LeaseDuration)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			ok, err := m.store.HeartbeatEvaluationRun(runID, workerID, now.UTC(), m.config.LeaseDuration)
+			if err == nil && ok {
+				leaseExpires = now.Add(m.config.LeaseDuration)
+				continue
+			}
+			if err == nil || now.After(leaseExpires) {
+				cancel(store.ErrLeaseLost)
+				return
+			}
+			log.Printf("[evaluation] run heartbeat failed run=%s: %v", runID, err)
 		}
 	}
 }
@@ -350,6 +452,9 @@ func (m *Manager) evaluateItem(parent context.Context, job *model.EvaluationJob,
 	defer cancel()
 	if err := m.processItem(ctx, job, item, result); err != nil {
 		result.ErrorMessage = err.Error()
+		if job.RunID != "" && job.Variant == "segmenter_on" {
+			_ = m.store.MarkEvaluationInputFailed(job.RunID, item.DatasetItemID, result.ErrorMessage, time.Now().UTC())
+		}
 	} else {
 		result.Status = model.EvaluationResultSucceeded
 	}
@@ -383,6 +488,23 @@ func (m *Manager) processItem(ctx context.Context, job *model.EvaluationJob, ite
 		if annotationMetrics.CharDistance != 0 {
 			return errors.New("reference segments do not reconstruct the reference text")
 		}
+	}
+	if job.RunID != "" {
+		input, ok, err := m.store.GetEvaluationInput(job.RunID, item.DatasetItemID)
+		if err != nil {
+			return fmt.Errorf("load shared ASR input: %w", err)
+		}
+		if !ok || input.Status != "succeeded" {
+			return errors.New("shared ASR input is unavailable")
+		}
+		var transcript struct {
+			Results   []asr.Result `json:"results"`
+			FinalText string       `json:"final_text"`
+		}
+		if err := json.Unmarshal([]byte(input.TranscriptJSON), &transcript); err != nil {
+			return fmt.Errorf("decode shared ASR input: %w", err)
+		}
+		return m.processTranscript(job, item, result, transcript.Results)
 	}
 
 	audioFile, err := m.objects.Open(item.AudioStorageKey)
@@ -428,6 +550,7 @@ func (m *Manager) processItem(ctx context.Context, job *model.EvaluationJob, ite
 		MinRunes:        job.Config.MinRunes, SemanticEnabled: job.Config.SemanticEnabled})
 	var finalASR []string
 	var lastPartial string
+	transcriptResults := make([]asr.Result, 0)
 	segments := make([]segmenter.Segment, 0)
 	for {
 		select {
@@ -451,6 +574,7 @@ func (m *Manager) processItem(ctx context.Context, job *model.EvaluationJob, ite
 				<-feedErr
 				return errors.New(recognized.Error)
 			}
+			transcriptResults = append(transcriptResults, recognized)
 			lastPartial = recognized.Text
 			if recognized.IsFinal {
 				finalASR = append(finalASR, recognized.Text)
@@ -505,6 +629,64 @@ complete:
 	result.SegmentedWordDistance, result.SegmentedWordUnits = segmentedMetrics.WordDistance, segmentedMetrics.WordUnits
 	segmentMetrics := CompareSegments(item.ReferenceSegments, segments)
 	result.SegmentMatched, result.SegmentPredicted, result.SegmentReference = segmentMetrics.Matched, segmentMetrics.Predicted, segmentMetrics.Reference
+	if job.RunID != "" {
+		raw, _ := json.Marshal(struct {
+			Results   []asr.Result `json:"results"`
+			FinalText string       `json:"final_text"`
+		}{transcriptResults, result.ASRText})
+		hash, _ := json.Marshal(job.Config)
+		digest := sha256.Sum256(hash)
+		if err := m.store.SaveEvaluationInput(&model.EvaluationInput{ID: uuid.NewString(), RunID: job.RunID, DatasetItemID: item.DatasetItemID, ASRProvider: job.Config.ASRProvider, ASRConfigHash: fmt.Sprintf("%x", digest[:]), TranscriptJSON: string(raw), Status: "succeeded"}, &result.CompletedAt); err != nil {
+			return fmt.Errorf("save shared ASR input: %w", err)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) processTranscript(job *model.EvaluationJob, item model.EvaluationWorkItem, result *model.EvaluationResult, transcript []asr.Result) error {
+	stream := segmenter.New(segmenter.Config{Enabled: job.Config.SegmenterEnabled, MaxRunes: job.Config.MaxRunes, MaxDuration: time.Duration(job.Config.MaxDurationMS) * time.Millisecond, SoftCommitDelay: time.Duration(job.Config.SoftCommitDelayMS) * time.Millisecond, MinRunes: job.Config.MinRunes, SemanticEnabled: job.Config.SemanticEnabled})
+	var finalASR []string
+	var lastPartial string
+	segments := make([]segmenter.Segment, 0)
+	for _, recognized := range transcript {
+		lastPartial = recognized.Text
+		if recognized.IsFinal {
+			finalASR = append(finalASR, recognized.Text)
+			lastPartial = ""
+		}
+		if job.Config.SegmenterEnabled {
+			segments = appendFinalSegments(segments, stream.Push(segmenter.Input{Text: recognized.Text, IsFinal: recognized.IsFinal, BeginTimeMS: recognized.BeginTimeMS, EndTimeMS: recognized.EndTimeMS}, time.Now()))
+		} else if recognized.IsFinal {
+			segments = append(segments, segmenter.Segment{ID: int64(len(segments) + 1), Revision: 1, Text: recognized.Text, IsFinal: true, Reason: segmenter.ReasonProviderFinal})
+		}
+	}
+	if job.Config.SegmenterEnabled {
+		segments = appendFinalSegments(segments, stream.Flush(time.Now()))
+	}
+	if len(finalASR) == 0 && strings.TrimSpace(lastPartial) != "" {
+		finalASR = append(finalASR, lastPartial)
+		if !job.Config.SegmenterEnabled {
+			segments = append(segments, segmenter.Segment{ID: int64(len(segments) + 1), Revision: 1, Text: lastPartial, IsFinal: true, Reason: segmenter.ReasonFlush})
+		}
+	}
+	result.ASRText = joinTranscript(finalASR)
+	if result.ASRText == "" {
+		return errors.New("shared ASR input returned no transcript")
+	}
+	texts := make([]string, 0, len(segments))
+	for _, s := range segments {
+		texts = append(texts, s.Text)
+	}
+	result.SegmentedText = joinTranscript(texts)
+	result.SegmentCount = len(segments)
+	raw, _ := json.Marshal(segments)
+	result.SegmentsJSON = string(raw)
+	a := Compare(result.ReferenceText, result.ASRText)
+	b := Compare(result.ReferenceText, result.SegmentedText)
+	result.ASRCharDistance, result.ASRCharUnits, result.ASRWordDistance, result.ASRWordUnits = a.CharDistance, a.CharUnits, a.WordDistance, a.WordUnits
+	result.SegmentedCharDistance, result.SegmentedCharUnits, result.SegmentedWordDistance, result.SegmentedWordUnits = b.CharDistance, b.CharUnits, b.WordDistance, b.WordUnits
+	sm := CompareSegments(item.ReferenceSegments, segments)
+	result.SegmentMatched, result.SegmentPredicted, result.SegmentReference = sm.Matched, sm.Predicted, sm.Reference
 	return nil
 }
 

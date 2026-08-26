@@ -90,7 +90,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Type-check and build test admin
         env:
-          ADMIN_BASE_PATH: /tmk-test/admin/
+          ADMIN_BASE_PATH: /tmk-admin/
         run: pnpm build
       - uses: actions/upload-artifact@v7
         with:
@@ -124,7 +124,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  admin-api-test:
+  control-api-test:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -140,11 +140,11 @@ jobs:
           CGO_ENABLED: '0'
           GOOS: linux
           GOARCH: amd64
-        run: mkdir -p ../dist && go build -trimpath -ldflags="-s -w" -o ../dist/tmk-admin-api .
+        run: mkdir -p ../dist && go build -trimpath -ldflags="-s -w" -o ../dist/tmk-control-api .
       - uses: actions/upload-artifact@v7
         with:
-          name: tmk-admin-api-linux
-          path: dist/tmk-admin-api
+          name: tmk-control-api-linux
+          path: dist/tmk-control-api
           if-no-files-found: error
           retention-days: 7
 
@@ -173,7 +173,7 @@ jobs:
           retention-days: 7
 
   deploy-test:
-    needs: [backend-test, client-test, admin-test, admin-api-test, monitor-test, build-server]
+    needs: [backend-test, client-test, admin-test, control-api-test, monitor-test, build-server]
     runs-on: ubuntu-latest
     environment: test
     steps:
@@ -192,7 +192,7 @@ jobs:
           path: dist
       - uses: actions/download-artifact@v8
         with:
-          name: tmk-admin-api-linux
+          name: tmk-control-api-linux
           path: dist
       - name: Configure deployment identity
         env:
@@ -219,19 +219,19 @@ jobs:
           admin_checksum=$(sha256sum dist/tmk-admin.tar.gz | awk '{print $1}')
           remote_admin="/var/lib/tmk-deploy/test/tmk-admin-${RELEASE_ID}.tar.gz"
           scp dist/tmk-admin.tar.gz "${USER}@${HOST}:${remote_admin}"
-          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-admin-test "${remote_admin}" "${admin_checksum}" "${RELEASE_ID}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-admin "${remote_admin}" "${admin_checksum}" "${RELEASE_ID}"
           chmod 755 dist/tmk-monitor
           gzip -9 -c dist/tmk-monitor > dist/tmk-monitor.gz
           monitor_checksum=$(sha256sum dist/tmk-monitor.gz | awk '{print $1}')
           remote_monitor="/var/lib/tmk-deploy/test/tmk-monitor-${RELEASE_ID}.gz"
           scp dist/tmk-monitor.gz "${USER}@${HOST}:${remote_monitor}"
-          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-monitor-test "${remote_monitor}" "${monitor_checksum}" "${RELEASE_ID}"
-          chmod 755 dist/tmk-admin-api
-          gzip -9 -c dist/tmk-admin-api > dist/tmk-admin-api.gz
-          admin_api_checksum=$(sha256sum dist/tmk-admin-api.gz | awk '{print $1}')
-          remote_admin_api="/var/lib/tmk-deploy/test/tmk-admin-api-${RELEASE_ID}.gz"
-          scp dist/tmk-admin-api.gz "${USER}@${HOST}:${remote_admin_api}"
-          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-admin-api-test "${remote_admin_api}" "${admin_api_checksum}" "${RELEASE_ID}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-monitor "${remote_monitor}" "${monitor_checksum}" "${RELEASE_ID}"
+          chmod 755 dist/tmk-control-api
+          gzip -9 -c dist/tmk-control-api > dist/tmk-control-api.gz
+          control_checksum=$(sha256sum dist/tmk-control-api.gz | awk '{print $1}')
+          remote_control="/var/lib/tmk-deploy/test/tmk-control-api-${RELEASE_ID}.gz"
+          scp dist/tmk-control-api.gz "${USER}@${HOST}:${remote_control}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-control-api "${remote_control}" "${control_checksum}" "${RELEASE_ID}"
           curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/api/health/ready"
-          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/admin-api/api/health/live"
-          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-test/monitoring/api/health/ready"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-control-api/api/health/live"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-monitor/api/health/ready"

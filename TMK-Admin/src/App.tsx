@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Activity, BellRing, ClipboardList, Database, FileStack, Gauge, LogOut, Menu, ShieldCheck, Users, X } from "lucide-react";
 import { api } from "./api";
 import { ErrorNotice } from "./components";
-import type { User } from "./types";
+import type { Environment, User } from "./types";
 import AuditPage from "./pages/AuditPage";
 import DashboardPage from "./pages/DashboardPage";
 import DatasetsPage from "./pages/DatasetsPage";
@@ -29,6 +29,7 @@ export default function App() {
   const [user, setUser] = useState<User>();
   const [page, setPage] = useState<PageID>(() => validPage(location.hash.slice(1)) ? location.hash.slice(1) as PageID : "dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [environment, setEnvironment] = useState(() => api.getEnvironment());
   useEffect(() => { api.onAuthLost = () => setUser(undefined); }, []);
   useEffect(() => {
     const syncPage = () => { const next = location.hash.slice(1); if (validPage(next)) setPage(next); };
@@ -47,9 +48,11 @@ export default function App() {
       <div className="account"><div><strong>{user.display_name || user.email}</strong><span>{user.email}</span></div><button className="icon-button" title="退出登录" onClick={async () => { await api.logout(); setUser(undefined); }}><LogOut size={18} /></button></div>
     </aside>
     {menuOpen && <button className="sidebar-scrim" onClick={() => setMenuOpen(false)} aria-label="关闭菜单" />}
-    <main className="main"><div className="mobile-bar"><button className="icon-button" title="打开菜单" onClick={() => setMenuOpen(true)}><Menu size={20} /></button><strong>TMK Admin</strong></div><div className="content">{content[page]}</div></main>
+    <main className="main"><div className="mobile-bar"><button className="icon-button" title="打开菜单" onClick={() => setMenuOpen(true)}><Menu size={20} /></button><strong>TMK Admin</strong><EnvironmentSelector value={environment} onChange={(value) => { api.setEnvironment(value); setEnvironment(value); }} /></div><div className="content">{content[page]}</div></main>
   </div>;
 }
+
+function EnvironmentSelector({ value, onChange }: { value: string; onChange: (value: string) => void }) { const [items, setItems] = useState<Environment[]>([]); useEffect(() => { api.request<Environment[]>("/environments").then(setItems).catch(() => undefined); }, []); return <select value={value} onChange={(event) => onChange(event.target.value)} aria-label="当前环境">{items.length ? items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>) : <><option value="test">测试环境</option><option value="production">生产环境</option></>}</select>; }
 
 function Login({ onLogin }: { onLogin: (user: User) => void }) {
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);

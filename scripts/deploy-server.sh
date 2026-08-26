@@ -123,6 +123,11 @@ if [[ ${healthy} != true ]]; then
 fi
 
 rm -f "${artifact}"
-/usr/local/sbin/tmk-record-deployment "${environment}" glance "${release_id}" success deploy
+if [[ -x /usr/local/sbin/tmk-record-deployment ]]; then
+  /usr/local/sbin/tmk-record-deployment "${environment}" glance "${release_id}" success deploy ||
+    printf 'warning: deployment succeeded but deployment record failed\n' >&2
+else
+  printf 'warning: deployment succeeded but tmk-record-deployment is unavailable\n' >&2
+fi
 deployment_recorded=true
 echo "deployed ${environment} release ${release_id}"

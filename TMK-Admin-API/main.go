@@ -20,11 +20,12 @@ import (
 )
 
 type Config struct {
-	Addr           string
-	GlanceURL      string
-	ServiceID      string
-	ServiceSecret  string
-	RequestTimeout time.Duration
+	Addr            string
+	GlanceURL       string
+	ServiceID       string
+	ServiceSecret   string
+	RequestTimeout  time.Duration
+	EnvironmentURLs map[string]string
 }
 
 type Envelope[T any] struct {
@@ -87,9 +88,13 @@ func main() {
 		write(w, http.StatusOK, r, Envelope[any]{Code: "OK", Message: "ok"})
 	})
 	mux.Handle("/api/v1/auth/me", app.requireAdmin(http.HandlerFunc(app.me)))
-	mux.Handle("/api/v1/admin/", app.requireAdmin(http.HandlerFunc(app.adminProxy)))
+	mux.Handle("/api/v1/environments", app.requireAdmin(http.HandlerFunc(app.environments)))
+	mux.Handle("/api/v1/environments/", app.requireAdmin(http.HandlerFunc(app.environmentProxy)))
+	mux.Handle("/api/v1/change-requests", app.requireAdmin(http.HandlerFunc(app.changeRequests)))
+	mux.Handle("/api/v1/change-requests/", app.requireAdmin(http.HandlerFunc(app.changeRequestRoute)))
 	mux.HandleFunc("/internal/events", app.eventsHandler)
 	mux.HandleFunc("/internal/audit", app.auditHandler)
+	mux.HandleFunc("/internal/v1/change-requests/authorize", app.authorizeChangeRequest)
 	mux.HandleFunc("/metrics", app.metrics)
 	server := &http.Server{Addr: cfg.Addr, Handler: app.requestLog(app.serviceAuth(mux)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	slog.Info("admin api starting", "addr", cfg.Addr, "glance_url", cfg.GlanceURL, "service_id", cfg.ServiceID)
@@ -100,7 +105,7 @@ func main() {
 }
 
 func loadConfig() Config {
-	return Config{Addr: env("ADMIN_API_ADDR", ":18180"), GlanceURL: strings.TrimRight(env("GLANCE_INTERNAL_URL", "http://127.0.0.1:18080"), "/"), ServiceID: env("ADMIN_API_SERVICE_ID", "tmk-admin-api"), ServiceSecret: env("ADMIN_API_SERVICE_SECRET", ""), RequestTimeout: 10 * time.Second}
+	return Config{Addr: env("ADMIN_API_ADDR", ":17180"), GlanceURL: strings.TrimRight(env("GLANCE_INTERNAL_URL", "http://127.0.0.1:18080"), "/"), ServiceID: env("ADMIN_API_SERVICE_ID", "tmk-control-api"), ServiceSecret: env("ADMIN_API_SERVICE_SECRET", ""), RequestTimeout: 10 * time.Second, EnvironmentURLs: map[string]string{"test": strings.TrimRight(env("CONTROL_TEST_GLANCE_URL", "http://127.0.0.1:18080"), "/"), "production": strings.TrimRight(env("CONTROL_PRODUCTION_GLANCE_URL", "http://127.0.0.1:8080"), "/")}}
 }
 
 func env(name, fallback string) string {
@@ -149,6 +154,46 @@ func (a *App) adminProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	path := strings.Replace(r.URL.Path, "/api/v1/admin/", "/internal/v1/admin/", 1)
 	a.proxy(w, r, path)
+}
+
+func (a *App) environments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		write(w, http.StatusMethodNotAllowed, r, Envelope[any]{Code: "METHOD_NOT_ALLOWED", Message: "method not allowed"})
+		return
+	}
+	data := []map[string]any{{"id": "test", "name": "测试环境", "enabled": a.cfg.EnvironmentURLs["test"] != ""}, {"id": "production", "name": "生产环境", "enabled": a.cfg.EnvironmentURLs["production"] != ""}}
+	write(w, http.StatusOK, r, Envelope[any]{Code: "OK", Message: "ok", Data: data})
+}
+
+func (a *App) environmentProxy(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/environments/"), "/")
+	if len(parts) < 2 || parts[1] != "admin" {
+		write(w, http.StatusBadRequest, r, Envelope[any]{Code: "INVALID_ENVIRONMENT_ROUTE", Message: "environment admin route is required"})
+		return
+	}
+	environment := parts[0]
+	base, ok := a.cfg.EnvironmentURLs[environment]
+	if !ok || base == "" {
+		write(w, http.StatusNotFound, r, Envelope[any]{Code: "ENVIRONMENT_NOT_FOUND", Message: "environment not found"})
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodPatch && r.Method != http.MethodPut && r.Method != http.MethodDelete {
+		write(w, http.StatusMethodNotAllowed, r, Envelope[any]{Code: "METHOD_NOT_ALLOWED", Message: "method not allowed"})
+		return
+	}
+	path := "/internal/v1/agent/" + strings.Join(parts[2:], "/")
+	headers := r.Header.Clone()
+	headers.Set("X-Environment", environment)
+	response, err := a.client.DoBase(r.Context(), base, r.Method, path, r.Body, headers, requestID(r))
+	if err != nil {
+		a.metricsData.UpstreamFailures.Add(1)
+		write(w, http.StatusBadGateway, r, Envelope[any]{Code: "ENVIRONMENT_UNAVAILABLE", Message: "environment service unavailable"})
+		return
+	}
+	defer response.Body.Close()
+	copyHeaders(w.Header(), response.Header)
+	w.WriteHeader(response.StatusCode)
+	_, _ = io.Copy(w, response.Body)
 }
 
 func (a *App) proxy(w http.ResponseWriter, r *http.Request, path string) {

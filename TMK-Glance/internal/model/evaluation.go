@@ -33,6 +33,9 @@ type EvaluationConfig struct {
 
 type EvaluationJob struct {
 	ID                    string           `json:"id"`
+	RunID                 string           `json:"run_id,omitempty"`
+	Variant               string           `json:"variant,omitempty"`
+	PairKey               string           `json:"pair_key,omitempty"`
 	DatasetID             string           `json:"dataset_id"`
 	DatasetRevision       int              `json:"dataset_revision"`
 	DatasetLanguage       string           `json:"dataset_language"`
@@ -64,6 +67,38 @@ type EvaluationJob struct {
 	LeaseOwner            string           `json:"-"`
 	LeaseExpiresAt        *time.Time       `json:"lease_expires_at,omitempty"`
 	HeartbeatAt           *time.Time       `json:"heartbeat_at,omitempty"`
+}
+
+type EvaluationRun struct {
+	ID              string           `json:"id"`
+	DatasetID       string           `json:"dataset_id"`
+	DatasetRevision int              `json:"dataset_revision"`
+	DatasetLanguage string           `json:"dataset_language"`
+	Mode            string           `json:"mode"`
+	Status          string           `json:"status"`
+	TotalItems      int              `json:"total_items"`
+	CompletedItems  int              `json:"completed_items"`
+	CreatedBy       string           `json:"created_by"`
+	Config          EvaluationConfig `json:"config"`
+	CreatedAt       time.Time        `json:"created_at"`
+	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
+	ErrorMessage    string           `json:"error_message,omitempty"`
+	InputStatus     string           `json:"input_status,omitempty"`
+	InputTotal      int              `json:"input_total,omitempty"`
+	InputCompleted  int              `json:"input_completed,omitempty"`
+	LeaseOwner      string           `json:"-"`
+	LeaseExpiresAt  *time.Time       `json:"-"`
+}
+
+type EvaluationInput struct {
+	ID             string `json:"id"`
+	RunID          string `json:"run_id"`
+	DatasetItemID  string `json:"dataset_item_id"`
+	ASRProvider    string `json:"asr_provider"`
+	ASRConfigHash  string `json:"asr_config_hash"`
+	TranscriptJSON string `json:"transcript_json"`
+	Status         string `json:"status"`
+	ErrorMessage   string `json:"error_message,omitempty"`
 }
 
 func (j EvaluationJob) ASRCER() float64 { return metricRate(j.ASRCharDistance, j.ASRCharUnits) }

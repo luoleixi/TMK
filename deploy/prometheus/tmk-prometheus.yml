@@ -21,36 +21,20 @@ scrape_configs:
       - targets: ["127.0.0.1:8080"]
         labels:
           environment: production
-  - job_name: tmk-admin-api-test
+  - job_name: tmk-control-api
     static_configs:
-      - targets: ["127.0.0.1:18180"]
-        labels:
-          environment: test
-          service: admin-api
-  - job_name: tmk-admin-api-production
-    static_configs:
-      - targets: ["127.0.0.1:28180"]
-        labels:
-          environment: production
-          service: admin-api
+      - targets: ["127.0.0.1:17180"]
+        labels: {service: control-api}
   - job_name: prometheus
     static_configs:
       - targets: ["127.0.0.1:9090"]
   - job_name: alertmanager
     static_configs:
       - targets: ["127.0.0.1:9093"]
-  - job_name: tmk-monitor-test
+  - job_name: tmk-monitor
     static_configs:
-      - targets: ["127.0.0.1:19090"]
-        labels:
-          environment: test
-          service: monitor
-  - job_name: tmk-monitor-production
-    static_configs:
-      - targets: ["127.0.0.1:29090"]
-        labels:
-          environment: production
-          service: monitor
+      - targets: ["127.0.0.1:17090"]
+        labels: {service: monitor}
   - job_name: blackbox-public
     metrics_path: /probe
     params:
@@ -58,8 +42,8 @@ scrape_configs:
     static_configs:
       - targets:
           - https://117.72.159.185/tmk-test/api/health/live
-          - https://117.72.159.185/tmk-test/admin-api/api/health/live
-          - https://117.72.159.185/tmk-test/monitoring/api/health/live
+          - https://117.72.159.185/tmk-control-api/api/health/live
+          - https://117.72.159.185/tmk-monitor/api/health/live
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,9 @@ func (c *GlanceClient) Health(ctx context.Context) error {
 	return nil
 }
 func (c *GlanceClient) Do(ctx context.Context, method, path string, body io.Reader, headers http.Header, requestID string) (*http.Response, error) {
+	return c.DoBase(ctx, c.base, method, path, body, headers, requestID)
+}
+func (c *GlanceClient) DoBase(ctx context.Context, base, method, path string, body io.Reader, headers http.Header, requestID string) (*http.Response, error) {
 	var data []byte
 	if body != nil {
 		var err error
@@ -41,7 +45,7 @@ func (c *GlanceClient) Do(ctx context.Context, method, path string, body io.Read
 			return nil, err
 		}
 	}
-	request, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(data))
+	request, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(base, "/")+path, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +55,7 @@ func (c *GlanceClient) Do(ctx context.Context, method, path string, body io.Read
 	}
 	request.Header.Set("X-Request-ID", requestID)
 	request.Header.Set("X-Trace-ID", requestID)
-	request.Header.Set("X-Admin-API", "tmk-admin-api")
+	request.Header.Set("X-Control-API", c.serviceID)
 	if c.secret != "" {
 		timestamp := time.Now().UTC().Format(time.RFC3339)
 		mac := hmac.New(sha256.New, []byte(c.secret))

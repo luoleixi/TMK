@@ -32,4 +32,7 @@ func (a *Application) registerAdminRoutes(admin *gin.RouterGroup) {
 	admin.GET("/evaluation-jobs/:id/results", a.handleListEvaluationResults)
 	admin.POST("/evaluation-jobs/:id/cancel", a.handleCancelEvaluationJob)
 	admin.POST("/evaluation-jobs/:id/retry", a.handleRetryEvaluationJob)
+	admin.POST("/evaluation-runs", a.handleCreateEvaluationRun)
+	admin.GET("/evaluation-runs/:id", a.handleGetEvaluationRun)
+	admin.GET("/evaluation-runs/:id/comparison", a.handleCompareEvaluationRun)
 }

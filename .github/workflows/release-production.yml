@@ -11,6 +11,10 @@ on:
         description: Type DEPLOY_PRODUCTION to continue
         required: true
         type: string
+      approval_token:
+        description: Control API production approval token
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -81,7 +85,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Type-check and build production admin
         env:
-          ADMIN_BASE_PATH: /tmk-production/admin/
+          ADMIN_BASE_PATH: /tmk-admin/
         run: pnpm build
       - uses: actions/upload-artifact@v7
         with:
@@ -115,7 +119,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  admin-api-test:
+  control-api-test:
     needs: validate
     runs-on: ubuntu-latest
     defaults:
@@ -132,16 +136,16 @@ jobs:
           CGO_ENABLED: '0'
           GOOS: linux
           GOARCH: amd64
-        run: mkdir -p ../dist && go build -trimpath -ldflags="-s -w" -o ../dist/tmk-admin-api .
+        run: mkdir -p ../dist && go build -trimpath -ldflags="-s -w" -o ../dist/tmk-control-api .
       - uses: actions/upload-artifact@v7
         with:
-          name: tmk-admin-api-production
-          path: dist/tmk-admin-api
+          name: tmk-control-api-production
+          path: dist/tmk-control-api
           if-no-files-found: error
           retention-days: 7
 
   build-server:
-    needs: [test-server, admin-test, monitor-test, admin-api-test]
+    needs: [test-server, admin-test, monitor-test, control-api-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -155,11 +159,11 @@ jobs:
           path: dist
       - uses: actions/download-artifact@v8
         with:
-          name: tmk-admin-api-production
+          name: tmk-control-api-production
           path: dist
       - uses: actions/download-artifact@v8
         with:
-          name: tmk-admin-api-production
+          name: tmk-control-api-production
           path: dist
       - name: Build Linux server
         working-directory: TMK-Glance
@@ -207,7 +211,13 @@ jobs:
           HOST: 117.72.159.185
           USER: tmk-deploy-production
           RELEASE_ID: ${{ github.sha }}
+          APPROVAL_TOKEN: ${{ inputs.approval_token }}
+          CONTROL_API_SERVICE_SECRET: ${{ secrets.CONTROL_API_SERVICE_SECRET }}
         run: |
+          test -n "$CONTROL_API_SERVICE_SECRET"
+          timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          signature=$(printf 'tmk-control-api\n%s\nGET\n/internal/v1/change-requests/authorize' "$timestamp" | openssl dgst -sha256 -hmac "$CONTROL_API_SERVICE_SECRET" -hex | awk '{print $2}')
+          curl --fail --show-error --silent "https://${HOST}/tmk-control-api/internal/v1/change-requests/authorize?environment=production&release_id=${RELEASE_ID}&commit_sha=${GITHUB_SHA}&token=${APPROVAL_TOKEN}" -H "X-Service-Timestamp: ${timestamp}" -H "X-Service-Signature: ${signature}"
           chmod 755 dist/tmk-glance
           gzip -9 -c dist/tmk-glance > dist/tmk-glance.gz
           checksum=$(sha256sum dist/tmk-glance.gz | awk '{print $1}')
@@ -218,22 +228,22 @@ jobs:
           admin_checksum=$(sha256sum dist/tmk-admin.tar.gz | awk '{print $1}')
           remote_admin="/var/lib/tmk-deploy/production/tmk-admin-${RELEASE_ID}.tar.gz"
           scp dist/tmk-admin.tar.gz "${USER}@${HOST}:${remote_admin}"
-          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-admin-production "${remote_admin}" "${admin_checksum}" "${RELEASE_ID}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-admin "${remote_admin}" "${admin_checksum}" "${RELEASE_ID}"
           chmod 755 dist/tmk-monitor
           gzip -9 -c dist/tmk-monitor > dist/tmk-monitor.gz
           monitor_checksum=$(sha256sum dist/tmk-monitor.gz | awk '{print $1}')
           remote_monitor="/var/lib/tmk-deploy/production/tmk-monitor-${RELEASE_ID}.gz"
           scp dist/tmk-monitor.gz "${USER}@${HOST}:${remote_monitor}"
-          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-monitor-production "${remote_monitor}" "${monitor_checksum}" "${RELEASE_ID}"
-          chmod 755 dist/tmk-admin-api
-          gzip -9 -c dist/tmk-admin-api > dist/tmk-admin-api.gz
-          admin_api_checksum=$(sha256sum dist/tmk-admin-api.gz | awk '{print $1}')
-          remote_admin_api="/var/lib/tmk-deploy/production/tmk-admin-api-${RELEASE_ID}.gz"
-          scp dist/tmk-admin-api.gz "${USER}@${HOST}:${remote_admin_api}"
-          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-admin-api-production "${remote_admin_api}" "${admin_api_checksum}" "${RELEASE_ID}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-monitor "${remote_monitor}" "${monitor_checksum}" "${RELEASE_ID}"
+          chmod 755 dist/tmk-control-api
+          gzip -9 -c dist/tmk-control-api > dist/tmk-control-api.gz
+          control_checksum=$(sha256sum dist/tmk-control-api.gz | awk '{print $1}')
+          remote_control="/var/lib/tmk-deploy/production/tmk-control-api-${RELEASE_ID}.gz"
+          scp dist/tmk-control-api.gz "${USER}@${HOST}:${remote_control}"
+          ssh "${USER}@${HOST}" sudo /usr/local/sbin/tmk-deploy-control-api "${remote_control}" "${control_checksum}" "${RELEASE_ID}"
           curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-production/api/health/ready"
-          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-production/admin-api/api/health/live"
-          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-production/monitoring/api/health/ready"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-control-api/api/health/live"
+          curl --fail --show-error --silent --retry 5 --retry-delay 2 "https://${HOST}/tmk-monitor/api/health/ready"
 
   build-and-publish-client:
     needs: deploy-production

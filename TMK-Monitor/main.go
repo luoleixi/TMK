@@ -31,6 +31,7 @@ type config struct {
 	LogPath         string
 	DeploymentPath  string
 	IncidentPath    string
+	Environments    map[string]config
 }
 
 type server struct {
@@ -126,6 +127,8 @@ func main() {
 	mux.HandleFunc("/api/health/ready", s.ready)
 	mux.HandleFunc("/api/health/dependencies", s.dependencies)
 	mux.HandleFunc("/metrics", s.metrics)
+	mux.HandleFunc("/api/v1/monitor/environments", s.environments)
+	mux.HandleFunc("/api/v1/monitor/", s.environmentRoute)
 	mux.HandleFunc("/api/monitoring/summary", s.summary)
 	mux.HandleFunc("/api/monitoring/alerts", s.alerts)
 	mux.HandleFunc("/api/monitoring/alerts/webhook", s.alertWebhook)
@@ -137,7 +140,7 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "not found") })
 
 	httpServer := &http.Server{Addr: cfg.Port, Handler: s.requestLog(s.auth(mux)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
-	slog.Info("monitor service starting", "port", cfg.Port, "environment", cfg.Environment)
+	slog.Info("monitor service starting", "port", cfg.Port, "environments", "test,production")
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("monitor service stopped", "error", err)
 		os.Exit(1)
@@ -145,8 +148,8 @@ func main() {
 }
 
 func loadConfig() config {
-	return config{
-		Port:            env("MONITOR_PORT", ":19090"),
+	base := config{
+		Port:            env("MONITOR_PORT", ":17090"),
 		PrometheusURL:   strings.TrimRight(env("PROMETHEUS_URL", "http://127.0.0.1:9090"), "/"),
 		AlertmanagerURL: strings.TrimRight(env("ALERTMANAGER_URL", "http://127.0.0.1:9093"), "/"),
 		TargetHealthURL: env("TMK_HEALTH_URL", "http://127.0.0.1:18080/api/health/ready"),
@@ -159,6 +162,55 @@ func loadConfig() config {
 		LogPath:         env("MONITOR_LOG_PATH", "/var/log/tmk/combined.jsonl"),
 		DeploymentPath:  env("MONITOR_DEPLOYMENT_PATH", "/var/lib/tmk/deployments.jsonl"),
 		IncidentPath:    env("MONITOR_INCIDENT_PATH", "/var/lib/tmk-monitor/incidents.jsonl"),
+	}
+	base.Environments = map[string]config{
+		"test":       {Environment: "test", PrometheusURL: strings.TrimRight(env("MONITOR_TEST_PROMETHEUS_URL", base.PrometheusURL), "/"), AlertmanagerURL: strings.TrimRight(env("MONITOR_TEST_ALERTMANAGER_URL", base.AlertmanagerURL), "/"), TargetHealthURL: env("MONITOR_TEST_TARGET_HEALTH_URL", base.TargetHealthURL), AdminHealthURL: env("MONITOR_CONTROL_HEALTH_URL", base.AdminHealthURL), LogPath: env("MONITOR_TEST_LOG_PATH", base.LogPath), DeploymentPath: env("MONITOR_TEST_DEPLOYMENT_PATH", base.DeploymentPath), IncidentPath: env("MONITOR_TEST_INCIDENT_PATH", base.IncidentPath)},
+		"production": {Environment: "production", PrometheusURL: strings.TrimRight(env("MONITOR_PRODUCTION_PROMETHEUS_URL", base.PrometheusURL), "/"), AlertmanagerURL: strings.TrimRight(env("MONITOR_PRODUCTION_ALERTMANAGER_URL", base.AlertmanagerURL), "/"), TargetHealthURL: env("MONITOR_PRODUCTION_TARGET_HEALTH_URL", "http://127.0.0.1:8080/api/health/ready"), AdminHealthURL: env("MONITOR_CONTROL_HEALTH_URL", base.AdminHealthURL), LogPath: env("MONITOR_PRODUCTION_LOG_PATH", base.LogPath), DeploymentPath: env("MONITOR_PRODUCTION_DEPLOYMENT_PATH", base.DeploymentPath), IncidentPath: env("MONITOR_PRODUCTION_INCIDENT_PATH", base.IncidentPath)},
+	}
+	return base
+}
+
+func (s *server) forEnvironment(environment string) (*server, bool) {
+	value, ok := s.cfg.Environments[environment]
+	if !ok {
+		return nil, false
+	}
+	value.Port, value.RequestTimeout, value.BasicUser, value.BasicPassword, value.WebhookToken = s.cfg.Port, s.cfg.RequestTimeout, s.cfg.BasicUser, s.cfg.BasicPassword, s.cfg.WebhookToken
+	return &server{cfg: value, client: s.client}, true
+}
+
+func (s *server) environments(w http.ResponseWriter, _ *http.Request) {
+	values := []map[string]any{{"id": "test", "name": "测试环境", "enabled": true}, {"id": "production", "name": "生产环境", "enabled": true}}
+	writeJSON(w, http.StatusOK, envelope[[]map[string]any]{Code: 0, Message: "ok", Data: values})
+}
+
+func (s *server) environmentRoute(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/monitor/"), "/"), "/")
+	if len(parts) < 2 {
+		writeError(w, http.StatusNotFound, "monitor environment route not found")
+		return
+	}
+	sc, ok := s.forEnvironment(parts[0])
+	if !ok {
+		writeError(w, http.StatusNotFound, "environment not found")
+		return
+	}
+	r.URL.Path = "/api/monitoring/" + strings.Join(parts[1:], "/")
+	switch parts[1] {
+	case "summary":
+		sc.summary(w, r)
+	case "alerts":
+		sc.alerts(w, r)
+	case "logs":
+		sc.logs(w, r)
+	case "deployments":
+		sc.deployments(w, r)
+	case "incidents":
+		sc.incidents(w, r)
+	case "query":
+		sc.query(w, r)
+	default:
+		writeError(w, http.StatusNotFound, "monitor route not found")
 	}
 }
 
@@ -229,18 +281,18 @@ func (s *server) summary(w http.ResponseWriter, r *http.Request) {
 	metrics := make(map[string]metricValue)
 	scope := `{environment="` + s.cfg.Environment + `"}`
 	queries := map[string]string{
-		"application_ready":      `tmk_application_ready` + scope,
-		"websocket_connections":  `tmk_websocket_connections` + scope,
-		"audio_drop_rate":        `sum(rate(tmk_websocket_audio_chunks_total{result="dropped",environment="` + s.cfg.Environment + `"}[5m])) / clamp_min(sum(rate(tmk_websocket_audio_chunks_total` + scope + `[5m])), 0.001)`,
-		"http_5xx_rate":          `sum(rate(tmk_http_requests_total{status=~"5..",environment="` + s.cfg.Environment + `"}[5m])) / clamp_min(sum(rate(tmk_http_requests_total` + scope + `[5m])), 1)`,
-		"http_p95_seconds":       `histogram_quantile(0.95, sum by (le) (rate(tmk_http_request_duration_seconds_bucket` + scope + `[5m])))`,
-		"asr_error_rate":         `sum(rate(tmk_asr_requests_total{outcome="error",environment="` + s.cfg.Environment + `"}[10m])) / clamp_min(sum(rate(tmk_asr_requests_total{outcome=~"success|error",environment="` + s.cfg.Environment + `"}[10m])), 0.001)`,
-		"translation_error_rate": `sum(rate(tmk_translation_requests_total{outcome=~"fallback|error",environment="` + s.cfg.Environment + `"}[10m])) / clamp_min(sum(rate(tmk_translation_requests_total` + scope + `[10m])), 0.001)`,
+		"application_ready":       `tmk_application_ready` + scope,
+		"websocket_connections":   `tmk_websocket_connections` + scope,
+		"audio_drop_rate":         `sum(rate(tmk_websocket_audio_chunks_total{result="dropped",environment="` + s.cfg.Environment + `"}[5m])) / clamp_min(sum(rate(tmk_websocket_audio_chunks_total` + scope + `[5m])), 0.001)`,
+		"http_5xx_rate":           `sum(rate(tmk_http_requests_total{status=~"5..",environment="` + s.cfg.Environment + `"}[5m])) / clamp_min(sum(rate(tmk_http_requests_total` + scope + `[5m])), 1)`,
+		"http_p95_seconds":        `histogram_quantile(0.95, sum by (le) (rate(tmk_http_request_duration_seconds_bucket` + scope + `[5m])))`,
+		"asr_error_rate":          `sum(rate(tmk_asr_requests_total{outcome="error",environment="` + s.cfg.Environment + `"}[10m])) / clamp_min(sum(rate(tmk_asr_requests_total{outcome=~"success|error",environment="` + s.cfg.Environment + `"}[10m])), 0.001)`,
+		"translation_error_rate":  `sum(rate(tmk_translation_requests_total{outcome=~"fallback|error",environment="` + s.cfg.Environment + `"}[10m])) / clamp_min(sum(rate(tmk_translation_requests_total` + scope + `[10m])), 0.001)`,
 		"model_tokens_per_second": `sum(rate(tmk_model_tokens_total` + scope + `[5m]))`,
-		"evaluation_queued":      `tmk_evaluation_jobs_queued` + scope,
-		"evaluation_running":     `tmk_evaluation_jobs_running` + scope,
-		"database_in_use":        `tmk_db_in_use_connections` + scope,
-		"storage_free_bytes":     `tmk_object_storage_free_bytes` + scope,
+		"evaluation_queued":       `tmk_evaluation_jobs_queued` + scope,
+		"evaluation_running":      `tmk_evaluation_jobs_running` + scope,
+		"database_in_use":         `tmk_db_in_use_connections` + scope,
+		"storage_free_bytes":      `tmk_object_storage_free_bytes` + scope,
 	}
 	for name, query := range queries {
 		metrics[name] = s.queryValue(r.Context(), query)

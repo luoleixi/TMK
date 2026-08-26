@@ -15,5 +15,5 @@ jobs:
     steps:
       - name: Probe emergency monitoring plane
         run: |
-          curl --fail --show-error --silent --max-time 15 --retry 2 https://117.72.159.185/tmk-test/monitoring/api/health/live
-          curl --fail --show-error --silent --max-time 15 --retry 2 https://117.72.159.185/tmk-test/monitoring/api/health/ready
+          curl --fail --show-error --silent --max-time 15 --retry 2 https://117.72.159.185/tmk-monitor/api/health/live
+          curl --fail --show-error --silent --max-time 15 --retry 2 https://117.72.159.185/tmk-monitor/api/health/ready

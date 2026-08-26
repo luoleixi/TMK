@@ -16,6 +16,7 @@ import (
 	"tmk-glance/internal/model"
 	"tmk-glance/internal/objectstore"
 	"tmk-glance/internal/observability"
+	"tmk-glance/internal/segmenter"
 	"tmk-glance/internal/store"
 	"tmk-glance/internal/translator"
 
@@ -23,21 +24,23 @@ import (
 )
 
 type Application struct {
-	cfg             *config.Config
-	store           *store.SessionStore
-	translator      translator.Translator
-	briefJobs       sync.Map
-	loginLimiter    *loginLimiter
-	objectStore     *objectstore.Local
-	evaluations     *evaluation.Manager
-	uploadMu        sync.Mutex
-	asrFactory      func(string) asr.ASR
-	metrics         *observability.Metrics
-	samplerStop     chan struct{}
-	samplerDone     chan struct{}
-	databaseHealthy atomic.Bool
-	storageHealthy  atomic.Bool
-	eventBus        *events.Bus
+	cfg                      *config.Config
+	store                    *store.SessionStore
+	translator               translator.Translator
+	briefJobs                sync.Map
+	loginLimiter             *loginLimiter
+	objectStore              *objectstore.Local
+	evaluations              *evaluation.Manager
+	uploadMu                 sync.Mutex
+	asrFactory               func(string) asr.ASR
+	metrics                  *observability.Metrics
+	samplerStop              chan struct{}
+	samplerDone              chan struct{}
+	databaseHealthy          atomic.Bool
+	storageHealthy           atomic.Bool
+	segmenterRuntime         atomic.Value
+	segmenterAppliedRevision atomic.Int64
+	eventBus                 *events.Bus
 }
 
 func SetupRouter(cfg *config.Config) *gin.Engine {
@@ -60,6 +63,7 @@ func NewApplication(cfg *config.Config) (*Application, error) {
 		asrFactory:   func(language string) asr.ASR { return newASR(cfg, language) },
 		metrics:      observability.NewMetrics(), samplerStop: make(chan struct{}), eventBus: events.NewBus(),
 	}
+	app.segmenterRuntime.Store(segmenterRuntimeState{config: segmenter.Config{Enabled: cfg.ASR.Segmenter.Enabled, MaxRunes: cfg.ASR.Segmenter.MaxRunes, MaxDuration: time.Duration(cfg.ASR.Segmenter.MaxDurationMS) * time.Millisecond, SoftCommitDelay: time.Duration(cfg.ASR.Segmenter.SoftCommitDelayMS) * time.Millisecond, MinRunes: cfg.ASR.Segmenter.MinRunes, PunctuationEnabled: cfg.ASR.Segmenter.PunctuationEnabled, SemanticEnabled: cfg.ASR.Segmenter.SemanticEnabled}, version: cfg.ASR.Segmenter.Version})
 	if err := app.bootstrapAdmin(); err != nil {
 		_ = sessionStore.Close()
 		return nil, err
@@ -133,7 +137,12 @@ func (a *Application) Router() *gin.Engine {
 		c.JSON(200, gin.H{"code": "OK", "message": "ok", "data": gin.H{"service": "glance"}})
 	})
 	internal.POST("/events/evaluation", a.handleInternalEvaluationEvent)
-	a.registerAdminRoutes(internal.Group("/admin"))
+	internal.GET("/runtime/segmenter", a.handleGetSegmenterRuntime)
+	internal.PUT("/runtime/segmenter", a.handleApplySegmenterRuntime)
+	a.registerAdminRoutes(internal.Group("/agent"))
+	agent := internal.Group("/agent")
+	agent.GET("/settings/segmenter", a.handleGetSegmenterRuntime)
+	agent.PUT("/settings/segmenter", a.handleApplySegmenterRuntime)
 	v1 := r.Group("/api/v1")
 	{
 		protected := v1.Group("")

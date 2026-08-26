@@ -9,8 +9,8 @@ groups:
         annotations:
           summary: TMK metrics endpoint is unavailable
           description: Prometheus cannot scrape a TMK environment.
-      - alert: TMKAdminAPIDown
-        expr: up{job=~"tmk-admin-api-test|tmk-admin-api-production"} == 0
+      - alert: TMKControlAPIDown
+        expr: up{job="tmk-control-api"} == 0
         for: 2m
         labels:
           severity: critical
@@ -18,7 +18,7 @@ groups:
           summary: TMK Admin API is unavailable
           description: The management control plane cannot be reached, while the monitoring plane remains available.
       - alert: TMKMonitoringPlaneDown
-        expr: up{job=~"tmk-monitor-test|tmk-monitor-production|prometheus|alertmanager"} == 0
+        expr: up{job=~"tmk-monitor|prometheus|alertmanager"} == 0
         for: 1m
         labels:
           severity: critical

@@ -15,7 +15,7 @@ route:
 receivers:
   - name: test-monitor
     webhook_configs:
-      - url: http://127.0.0.1:19090/api/monitoring/alerts/webhook
+      - url: http://127.0.0.1:17090/api/monitoring/alerts/webhook
         send_resolved: true
         http_config:
           authorization:
@@ -23,7 +23,7 @@ receivers:
             credentials_file: /etc/prometheus/tmk-monitor-webhook-token
   - name: production-monitor
     webhook_configs:
-      - url: http://127.0.0.1:29090/api/monitoring/alerts/webhook
+      - url: http://127.0.0.1:17090/api/monitoring/alerts/webhook
         send_resolved: true
         http_config:
           authorization:

@@ -11,13 +11,11 @@ function adminApiBase(): string {
   if (import.meta.env.VITE_ADMIN_API_BASE) return import.meta.env.VITE_ADMIN_API_BASE.replace(/\/$/, "");
   const marker = window.location.pathname.indexOf("/admin");
   const deploymentPrefix = marker >= 0 ? window.location.pathname.slice(0, marker) : "";
-  return `${deploymentPrefix}/admin-api/api/v1`;
+  return `${deploymentPrefix}/tmk-control-api/api/v1`;
 }
 
 function monitoringBase(): string {
-  const marker = window.location.pathname.indexOf("/admin");
-  const deploymentPrefix = marker >= 0 ? window.location.pathname.slice(0, marker) : "";
-  return `${deploymentPrefix}/monitoring/api`;
+	return import.meta.env.VITE_MONITOR_API_BASE?.replace(/\/$/, "") || "/tmk-monitor/api/v1";
 }
 
 export class ApiError extends Error {
@@ -30,7 +28,11 @@ class ApiClient {
   private accessToken = "";
   private refreshToken = "";
   private refreshPromise: Promise<boolean> | null = null;
+  private environment = "test";
   onAuthLost?: () => void;
+  setEnvironment(value: string) { this.environment = value; }
+  getEnvironment() { return this.environment; }
+  private path(path: string) { return path.startsWith("/admin/") ? `/environments/${this.environment}${path}` : path; }
 
   async login(email: string, password: string): Promise<User> {
     const response = await this.raw<TokenPair>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }, false);
@@ -51,8 +53,11 @@ class ApiClient {
     return this.raw<T>(path, init, true, true);
   }
 
-  async monitoringRequest<T>(path: string): Promise<T> {
-    const response = await fetch(`${monitoringBase()}${path}`, { headers: { Accept: "application/json" } });
+	async monitoringRequest<T>(path: string): Promise<T> {
+		const environment = this.environment;
+		const normalized = path.startsWith("/") ? path : `/${path}`;
+		const monitorPath = normalized.startsWith("/monitor/") ? normalized : `/monitor/${environment}${normalized}`;
+		const response = await fetch(`${monitoringBase()}${monitorPath}`, { headers: { Accept: "application/json" } });
     const payload = await response.json().catch(() => ({ message: "监控服务请求失败" })) as Envelope<T>;
     if (!response.ok) throw new ApiError(response.status, payload.message || "监控服务请求失败");
     return payload.data;
@@ -66,10 +71,10 @@ class ApiClient {
 
   async download(path: string): Promise<Blob> {
     const headers = new Headers({ Authorization: `Bearer ${this.accessToken}` });
-    let response = await fetch(`${adminApiBase()}${path}`, { headers });
+    let response = await fetch(`${adminApiBase()}${this.path(path)}`, { headers });
     if (response.status === 401 && await this.refresh()) {
       headers.set("Authorization", `Bearer ${this.accessToken}`);
-      response = await fetch(`${adminApiBase()}${path}`, { headers });
+      response = await fetch(`${adminApiBase()}${this.path(path)}`, { headers });
     }
     if (!response.ok) throw new ApiError(response.status, "下载失败");
     return response.blob();
@@ -79,7 +84,7 @@ class ApiClient {
     const headers = new Headers(init.headers);
     if (!(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
     if (authenticate && this.accessToken) headers.set("Authorization", `Bearer ${this.accessToken}`);
-    const response = await fetch(`${adminApiBase()}${path}`, { ...init, headers });
+    const response = await fetch(`${adminApiBase()}${this.path(path)}`, { ...init, headers });
     if (response.status === 401 && authenticate && retry && await this.refresh()) {
       return this.raw<T>(path, init, authenticate, false);
     }

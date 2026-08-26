@@ -6,10 +6,8 @@ sources:
     include_units:
       - tmk-glance@test.service
       - tmk-glance@production.service
-      - tmk-admin-api@test.service
-      - tmk-admin-api@production.service
-      - tmk-monitor@test.service
-      - tmk-monitor@production.service
+      - tmk-control-api.service
+      - tmk-monitor.service
   nginx:
     type: file
     include:

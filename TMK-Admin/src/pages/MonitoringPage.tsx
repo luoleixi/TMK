@@ -45,7 +45,7 @@ export default function MonitoringPage() {
       </section>
       <section className={`monitor-target ${data.admin_target.up ? "is-up" : "is-down"}`}>
         {data.admin_target.up ? <CheckCircle2 size={23} /> : <ServerCrash size={23} />}
-        <div><strong>{data.admin_target.up ? "Admin API 正常" : "Admin API 不可用"}</strong><span>{data.admin_target.up ? `健康检查 ${data.admin_target.latency_ms} ms · HTTP ${data.admin_target.status_code}` : data.admin_target.error || "健康检查失败"}</span></div>
+        <div><strong>{data.admin_target.up ? "Control API 正常" : "Control API 不可用"}</strong><span>{data.admin_target.up ? `健康检查 ${data.admin_target.latency_ms} ms · HTTP ${data.admin_target.status_code}` : data.admin_target.error || "健康检查失败"}</span></div>
       </section>
       <section className="metric-grid monitoring-metrics">
         {Object.entries(data.metrics).map(([name, metric]) => <Metric key={name} label={metricLabels[name] || name} value={formatMetric(name, metric.value, metric.error)} tone={metric.error ? "warn" : metricTone(name, metric.value)} />)}

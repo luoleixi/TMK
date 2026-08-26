@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"tmk-glance/internal/model"
 )
 
@@ -94,7 +95,10 @@ func migrateEvaluationSQLite(db *sql.DB) error {
 	if err := ensureEvaluationMetricColumnsSQLite(db); err != nil {
 		return err
 	}
-	return ensureEvaluationReliabilitySQLite(db)
+	if err := ensureEvaluationReliabilitySQLite(db); err != nil {
+		return err
+	}
+	return ensureEvaluationABSQLite(db)
 }
 
 func migrateEvaluationMySQL(db *sql.DB) error {
@@ -146,7 +150,71 @@ func migrateEvaluationMySQL(db *sql.DB) error {
 	if err := ensureEvaluationMetricColumnsMySQL(db); err != nil {
 		return err
 	}
-	return ensureEvaluationReliabilityMySQL(db)
+	if err := ensureEvaluationReliabilityMySQL(db); err != nil {
+		return err
+	}
+	return ensureEvaluationABMySQL(db)
+}
+
+func ensureEvaluationABSQLite(db *sql.DB) error {
+	for _, q := range []string{`CREATE TABLE IF NOT EXISTS evaluation_runs (id TEXT PRIMARY KEY,dataset_id TEXT NOT NULL,dataset_revision INTEGER NOT NULL,dataset_language TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,total_items INTEGER NOT NULL DEFAULT 0,completed_items INTEGER NOT NULL DEFAULT 0,input_status TEXT NOT NULL DEFAULT 'pending',input_total INTEGER NOT NULL DEFAULT 0,input_completed INTEGER NOT NULL DEFAULT 0,lease_owner TEXT,lease_expires_at TEXT,created_by TEXT NOT NULL,config_json TEXT NOT NULL,created_at TEXT NOT NULL,completed_at TEXT,error_message TEXT NOT NULL DEFAULT '')`, `CREATE TABLE IF NOT EXISTS evaluation_inputs (id TEXT PRIMARY KEY,run_id TEXT NOT NULL,dataset_item_id TEXT NOT NULL,asr_provider TEXT NOT NULL,asr_config_hash TEXT NOT NULL,transcript_json TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,error_message TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,completed_at TEXT,UNIQUE(run_id,dataset_item_id))`} {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	for _, c := range []struct{ name, typ string }{{"input_status", "TEXT NOT NULL DEFAULT 'pending'"}, {"input_total", "INTEGER NOT NULL DEFAULT 0"}, {"input_completed", "INTEGER NOT NULL DEFAULT 0"}, {"lease_owner", "TEXT"}, {"lease_expires_at", "TEXT"}} {
+		columns, err := sqliteColumnNames(db, "evaluation_runs")
+		if err != nil {
+			return err
+		}
+		if !columns[c.name] {
+			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE evaluation_runs ADD COLUMN %s %s`, c.name, c.typ)); err != nil {
+				return err
+			}
+		}
+	}
+	columns, err := sqliteColumnNames(db, "evaluation_jobs")
+	if err != nil {
+		return err
+	}
+	for _, c := range []struct{ name, typ string }{{"run_id", "TEXT"}, {"variant", "TEXT"}, {"pair_key", "TEXT"}} {
+		if !columns[c.name] {
+			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE evaluation_jobs ADD COLUMN %s %s`, c.name, c.typ)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+func ensureEvaluationABMySQL(db *sql.DB) error {
+	for _, q := range []string{`CREATE TABLE IF NOT EXISTS evaluation_runs (id VARCHAR(36) PRIMARY KEY,dataset_id VARCHAR(36) NOT NULL,dataset_revision INT NOT NULL,dataset_language VARCHAR(32) NOT NULL,mode VARCHAR(16) NOT NULL,status VARCHAR(32) NOT NULL,total_items INT NOT NULL DEFAULT 0,completed_items INT NOT NULL DEFAULT 0,input_status VARCHAR(20) NOT NULL DEFAULT 'pending',input_total INT NOT NULL DEFAULT 0,input_completed INT NOT NULL DEFAULT 0,lease_owner VARCHAR(100) NULL,lease_expires_at VARCHAR(40) NULL,created_by VARCHAR(36) NOT NULL,config_json JSON NOT NULL,created_at VARCHAR(40) NOT NULL,completed_at VARCHAR(40) NULL,error_message TEXT NOT NULL,INDEX idx_evaluation_runs_created(created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`, `CREATE TABLE IF NOT EXISTS evaluation_inputs (id VARCHAR(36) PRIMARY KEY,run_id VARCHAR(36) NOT NULL,dataset_item_id VARCHAR(36) NOT NULL,asr_provider VARCHAR(64) NOT NULL,asr_config_hash VARCHAR(128) NOT NULL,transcript_json LONGTEXT NOT NULL,status VARCHAR(20) NOT NULL,error_message TEXT NOT NULL,created_at VARCHAR(40) NOT NULL,completed_at VARCHAR(40) NULL,UNIQUE KEY uq_evaluation_input_item(run_id,dataset_item_id),CONSTRAINT fk_evaluation_input_run FOREIGN KEY(run_id) REFERENCES evaluation_runs(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`} {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	for _, c := range []struct{ name, typ string }{{"run_id", "VARCHAR(36) NULL"}, {"variant", "VARCHAR(32) NULL"}, {"pair_key", "VARCHAR(64) NULL"}} {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='evaluation_jobs' AND column_name=?`, c.name).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE evaluation_jobs ADD COLUMN %s %s`, c.name, c.typ)); err != nil {
+				return err
+			}
+		}
+	}
+	for _, c := range []struct{ name, typ string }{{"input_status", "VARCHAR(20) NOT NULL DEFAULT 'pending'"}, {"input_total", "INT NOT NULL DEFAULT 0"}, {"input_completed", "INT NOT NULL DEFAULT 0"}, {"lease_owner", "VARCHAR(100) NULL"}, {"lease_expires_at", "VARCHAR(40) NULL"}} {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='evaluation_runs' AND column_name=?`, c.name).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE evaluation_runs ADD COLUMN %s %s`, c.name, c.typ)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 var segmentationMetricColumns = []string{"segment_matched", "segment_predicted", "segment_reference"}
@@ -284,14 +352,245 @@ func (s *SessionStore) CreateEvaluationJob(job *model.EvaluationJob) error {
 		return err
 	}
 	_, err = tx.Exec(`INSERT INTO evaluation_jobs
-		(id, dataset_id, dataset_revision, dataset_language, status, config_json, total_items, error_message,
+		(id, run_id, variant, pair_key, dataset_id, dataset_revision, dataset_language, status, config_json, total_items, error_message,
 		 requested_by, created_at, max_attempts)
-		VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)`, job.ID, job.DatasetID, job.DatasetRevision, job.DatasetLanguage,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)`, job.ID, nullString(job.RunID), nullString(job.Variant), nullString(job.PairKey), job.DatasetID, job.DatasetRevision, job.DatasetLanguage,
 		job.Status, string(configJSON), job.TotalItems, job.RequestedBy, formatTime(job.CreatedAt), job.MaxAttempts)
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *SessionStore) CreateEvaluationABRun(run *model.EvaluationRun, jobs []*model.EvaluationJob) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var status string
+	if err = tx.QueryRow(`SELECT status,revision,language,item_count FROM datasets WHERE id=?`, run.DatasetID).Scan(&status, &run.DatasetRevision, &run.DatasetLanguage, &run.TotalItems); err != nil {
+		return err
+	}
+	if status != model.DatasetStatusReady || run.TotalItems == 0 {
+		return ErrDatasetNotReady
+	}
+	run.Mode = "ab"
+	run.Status = model.EvaluationJobQueued
+	configJSON, _ := json.Marshal(run.Config)
+	run.InputStatus, run.InputTotal = "pending", run.TotalItems
+	_, err = tx.Exec(`INSERT INTO evaluation_runs(id,dataset_id,dataset_revision,dataset_language,mode,status,total_items,input_status,input_total,created_by,config_json,created_at,error_message) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, run.ID, run.DatasetID, run.DatasetRevision, run.DatasetLanguage, run.Mode, run.Status, run.TotalItems, run.InputStatus, run.InputTotal, run.CreatedBy, string(configJSON), formatTime(run.CreatedAt), "")
+	if err != nil {
+		return err
+	}
+	for _, job := range jobs {
+		job.DatasetRevision, job.DatasetLanguage, job.TotalItems = run.DatasetRevision, run.DatasetLanguage, run.TotalItems
+		raw, _ := json.Marshal(job.Config)
+		if _, err = tx.Exec(`INSERT INTO evaluation_jobs(id,run_id,variant,pair_key,dataset_id,dataset_revision,dataset_language,status,config_json,total_items,error_message,requested_by,created_at,max_attempts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, job.ID, run.ID, job.Variant, job.PairKey, run.DatasetID, run.DatasetRevision, run.DatasetLanguage, model.EvaluationJobQueued, string(raw), run.TotalItems, "", job.RequestedBy, formatTime(job.CreatedAt), job.MaxAttempts); err != nil {
+			return err
+		}
+	}
+	rows, err := tx.Query(`SELECT id FROM dataset_items WHERE dataset_id=? ORDER BY sequence`, run.DatasetID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var itemID string
+		if err := rows.Scan(&itemID); err != nil {
+			return err
+		}
+		inputID := uuid.NewString()
+		if _, err := tx.Exec(`INSERT INTO evaluation_inputs(id,run_id,dataset_item_id,asr_provider,asr_config_hash,transcript_json,status,error_message,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, inputID, run.ID, itemID, run.Config.ASRProvider, "", "", "pending", "", formatTime(run.CreatedAt)); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SessionStore) GetEvaluationRun(id string) (*model.EvaluationRun, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getEvaluationRunLocked(id)
+}
+func (s *SessionStore) getEvaluationRunLocked(id string) (*model.EvaluationRun, bool, error) {
+	var run model.EvaluationRun
+	var raw, created string
+	var completed sql.NullString
+	var inputStatus, leaseOwner sql.NullString
+	var inputTotal, inputCompleted int
+	var leaseExpires sql.NullString
+	err := s.db.QueryRow(`SELECT id,dataset_id,dataset_revision,dataset_language,mode,status,total_items,completed_items,input_status,input_total,input_completed,lease_owner,lease_expires_at,created_by,config_json,created_at,completed_at,error_message FROM evaluation_runs WHERE id=?`, id).Scan(&run.ID, &run.DatasetID, &run.DatasetRevision, &run.DatasetLanguage, &run.Mode, &run.Status, &run.TotalItems, &run.CompletedItems, &inputStatus, &inputTotal, &inputCompleted, &leaseOwner, &leaseExpires, &run.CreatedBy, &raw, &created, &completed, &run.ErrorMessage)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if err = json.Unmarshal([]byte(raw), &run.Config); err != nil {
+		return nil, false, err
+	}
+	run.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+	run.InputStatus, run.InputTotal, run.InputCompleted, run.LeaseOwner = inputStatus.String, inputTotal, inputCompleted, leaseOwner.String
+	if leaseExpires.Valid {
+		parsed, _ := time.Parse(time.RFC3339Nano, leaseExpires.String)
+		run.LeaseExpiresAt = &parsed
+	}
+	if completed.Valid {
+		v, _ := time.Parse(time.RFC3339Nano, completed.String)
+		run.CompletedAt = &v
+	}
+	return &run, true, nil
+}
+
+func (s *SessionStore) GetEvaluationInput(runID, itemID string) (*model.EvaluationInput, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var input model.EvaluationInput
+	var created, completed sql.NullString
+	err := s.db.QueryRow(`SELECT id,run_id,dataset_item_id,asr_provider,asr_config_hash,transcript_json,status,error_message,created_at,completed_at FROM evaluation_inputs WHERE run_id=? AND dataset_item_id=?`, runID, itemID).Scan(&input.ID, &input.RunID, &input.DatasetItemID, &input.ASRProvider, &input.ASRConfigHash, &input.TranscriptJSON, &input.Status, &input.ErrorMessage, &created, &completed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	return &input, err == nil, err
+}
+func (s *SessionStore) SaveEvaluationInput(input *model.EvaluationInput, completedAt *time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var completed any
+	if completedAt != nil {
+		completed = formatTime(*completedAt)
+	}
+	args := []any{input.ID, input.RunID, input.DatasetItemID, input.ASRProvider, input.ASRConfigHash, input.TranscriptJSON, input.Status, input.ErrorMessage, formatTime(time.Now()), completed}
+	var err error
+	if s.driver == DriverMySQL {
+		_, err = s.db.Exec(`INSERT INTO evaluation_inputs(id,run_id,dataset_item_id,asr_provider,asr_config_hash,transcript_json,status,error_message,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE transcript_json=VALUES(transcript_json),status=VALUES(status),error_message=VALUES(error_message),completed_at=VALUES(completed_at)`, args...)
+	} else {
+		_, err = s.db.Exec(`INSERT INTO evaluation_inputs(id,run_id,dataset_item_id,asr_provider,asr_config_hash,transcript_json,status,error_message,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,dataset_item_id) DO UPDATE SET transcript_json=excluded.transcript_json,status=excluded.status,error_message=excluded.error_message,completed_at=excluded.completed_at`, args...)
+	}
+	return err
+}
+
+func (s *SessionStore) MarkEvaluationInputFailed(runID, datasetItemID, message string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE evaluation_inputs SET status='failed',error_message=?,completed_at=? WHERE run_id=? AND dataset_item_id=? AND status<>'succeeded'`, message, formatEvaluationTime(now), runID, datasetItemID)
+	return err
+}
+
+func (s *SessionStore) ListEvaluationRunJobs(runID string) ([]model.EvaluationJob, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(evaluationJobSelect+` WHERE run_id=? ORDER BY variant`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var jobs []model.EvaluationJob
+	for rows.Next() {
+		job, ok, err := scanEvaluationJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			jobs = append(jobs, *job)
+		}
+	}
+	return jobs, rows.Err()
+}
+
+func (s *SessionStore) ActivateEvaluationJob(id, workerID string, now time.Time, leaseDuration time.Duration) (*model.EvaluationJob, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, err := s.db.Exec(`UPDATE evaluation_jobs SET status='running',started_at=COALESCE(started_at,?),attempt_count=attempt_count+1,lease_owner=?,lease_expires_at=?,heartbeat_at=? WHERE id=? AND status='queued'`, formatEvaluationTime(now), workerID, formatEvaluationTime(now.Add(leaseDuration)), formatEvaluationTime(now), id)
+	if err != nil {
+		return nil, false, err
+	}
+	n, _ := result.RowsAffected()
+	if n != 1 {
+		return nil, false, nil
+	}
+	return scanEvaluationJob(s.db.QueryRow(evaluationJobSelect+` WHERE id=?`, id))
+}
+
+func (s *SessionStore) ClaimEvaluationRun(runID, workerID string, now time.Time, leaseDuration time.Duration) (*model.EvaluationRun, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, err := s.db.Exec(`UPDATE evaluation_runs SET status='running',lease_owner=?,lease_expires_at=? WHERE id=? AND status IN ('pending','running') AND (lease_expires_at IS NULL OR lease_expires_at<=? OR lease_owner=?)`, workerID, formatEvaluationTime(now.Add(leaseDuration)), runID, formatEvaluationTime(now), workerID)
+	if err != nil {
+		return nil, false, err
+	}
+	n, _ := result.RowsAffected()
+	if n != 1 {
+		return nil, false, nil
+	}
+	return s.getEvaluationRunLocked(runID)
+}
+func (s *SessionStore) HeartbeatEvaluationRun(runID, workerID string, now time.Time, leaseDuration time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, err := s.db.Exec(`UPDATE evaluation_runs SET lease_expires_at=? WHERE id=? AND status='running' AND lease_owner=? AND lease_expires_at>?`, formatEvaluationTime(now.Add(leaseDuration)), runID, workerID, formatEvaluationTime(now))
+	if err != nil {
+		return false, err
+	}
+	n, _ := r.RowsAffected()
+	return n == 1, nil
+}
+func (s *SessionStore) ReleaseEvaluationRun(runID, workerID string, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, err := s.db.Exec(`UPDATE evaluation_runs SET status='pending',lease_owner=NULL,lease_expires_at=NULL WHERE id=? AND lease_owner=?`, runID, workerID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := r.RowsAffected()
+	return n == 1, nil
+}
+func (s *SessionStore) AggregateEvaluationRun(runID string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var inputs, inputDone, inputFailed int
+	if err := s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(status='succeeded'),0), COALESCE(SUM(status='failed'),0) FROM evaluation_inputs WHERE run_id=?`, runID).Scan(&inputs, &inputDone, &inputFailed); err != nil {
+		return err
+	}
+	var variants, variantDone, variantErrors int
+	if err := s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(status IN ('succeeded','completed_with_errors')),0), COALESCE(SUM(status='completed_with_errors'),0) FROM evaluation_jobs WHERE run_id=?`, runID).Scan(&variants, &variantDone, &variantErrors); err != nil {
+		return err
+	}
+	status := "running"
+	if inputs > 0 && inputFailed == inputs {
+		status = "failed"
+	} else if variants == 2 && variantDone == 2 {
+		if inputFailed > 0 || variantErrors > 0 {
+			status = "completed_with_errors"
+		} else {
+			status = "completed"
+		}
+	}
+	inputStatus := "running"
+	if inputs > 0 && inputDone == inputs {
+		inputStatus = "succeeded"
+	} else if inputFailed > 0 && inputDone+inputFailed == inputs {
+		inputStatus = "failed"
+	}
+	completedAt := any(nil)
+	if status == "completed" || status == "completed_with_errors" || status == "failed" {
+		completedAt = formatEvaluationTime(now)
+	}
+	_, err := s.db.Exec(`UPDATE evaluation_runs SET input_completed=?,input_status=?,completed_items=?,status=?,completed_at=COALESCE(?,completed_at),lease_owner=NULL,lease_expires_at=NULL WHERE id=?`, inputDone, inputStatus, variantDone, status, completedAt, runID)
+	return err
+}
+
+func nullString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func (s *SessionStore) GetEvaluationJob(id string) (*model.EvaluationJob, bool, error) {
@@ -391,7 +690,7 @@ func (s *SessionStore) ClaimNextEvaluationJob(workerID string, now time.Time, le
 	defer s.mu.Unlock()
 	for {
 		job, ok, err := scanEvaluationJob(s.db.QueryRow(evaluationJobSelect+` WHERE status='queued'
-			AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY created_at LIMIT 1`, formatEvaluationTime(now)))
+			AND (next_attempt_at IS NULL OR next_attempt_at<=?) AND (run_id IS NULL OR variant='segmenter_on') ORDER BY created_at LIMIT 1`, formatEvaluationTime(now)))
 		if err != nil || !ok {
 			return job, ok, err
 		}
@@ -684,7 +983,7 @@ func (s *SessionStore) ListEvaluationResults(jobID string, limit, offset int) ([
 	return results, total, rows.Err()
 }
 
-const evaluationJobSelect = `SELECT id, dataset_id, dataset_revision, dataset_language, status, config_json, total_items,
+const evaluationJobSelect = `SELECT id, run_id, variant, pair_key, dataset_id, dataset_revision, dataset_language, status, config_json, total_items,
 	completed_items, succeeded_items, failed_items, asr_char_distance, asr_char_units,
 	segmented_char_distance, segmented_char_units, asr_word_distance, asr_word_units,
 	segmented_word_distance, segmented_word_units, segment_matched, segment_predicted, segment_reference,
@@ -696,7 +995,8 @@ func scanEvaluationJob(row interface{ Scan(...any) error }) (*model.EvaluationJo
 	var job model.EvaluationJob
 	var configJSON, createdAt string
 	var startedAt, completedAt, nextAttemptAt, leaseExpiresAt, heartbeatAt, leaseOwner sql.NullString
-	err := row.Scan(&job.ID, &job.DatasetID, &job.DatasetRevision, &job.DatasetLanguage, &job.Status, &configJSON, &job.TotalItems,
+	var runID, variant, pairKey sql.NullString
+	err := row.Scan(&job.ID, &runID, &variant, &pairKey, &job.DatasetID, &job.DatasetRevision, &job.DatasetLanguage, &job.Status, &configJSON, &job.TotalItems,
 		&job.CompletedItems, &job.SucceededItems, &job.FailedItems, &job.ASRCharDistance, &job.ASRCharUnits,
 		&job.SegmentedCharDistance, &job.SegmentedCharUnits, &job.ASRWordDistance, &job.ASRWordUnits,
 		&job.SegmentedWordDistance, &job.SegmentedWordUnits, &job.SegmentMatched, &job.SegmentPredicted,
@@ -709,6 +1009,7 @@ func scanEvaluationJob(row interface{ Scan(...any) error }) (*model.EvaluationJo
 	if err != nil {
 		return nil, false, err
 	}
+	job.RunID, job.Variant, job.PairKey = runID.String, variant.String, pairKey.String
 	if err := json.Unmarshal([]byte(configJSON), &job.Config); err != nil {
 		return nil, false, err
 	}

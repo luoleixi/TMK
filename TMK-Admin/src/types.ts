@@ -8,6 +8,7 @@ export type User = {
   created_at: string;
   last_login_at?: string;
 };
+export type Environment = { id: "test" | "production"; name: string; enabled: boolean };
 
 export type TokenPair = {
   access_token: string;
@@ -57,6 +58,8 @@ export type Dataset = {
 
 export type EvaluationJob = {
   id: string;
+  run_id?: string;
+  variant?: "segmenter_on" | "segmenter_off";
   dataset_id: string;
   dataset_revision: number;
   dataset_language: string;
@@ -79,6 +82,31 @@ export type EvaluationJob = {
   max_attempts: number;
   next_attempt_at?: string;
   lease_expires_at?: string;
+};
+
+export type EvaluationRun = {
+  id: string;
+  dataset_id: string;
+  dataset_revision: number;
+  dataset_language: string;
+  mode: string;
+  status: string;
+  total_items: number;
+  completed_items: number;
+  created_at: string;
+  jobs?: EvaluationJob[];
+};
+
+export type SegmenterRuntimeConfig = {
+  enabled: boolean;
+  rollout_percent: number;
+  version: string;
+  revision: number;
+  status: string;
+  changed_by?: string;
+  change_reason?: string;
+  created_at?: string;
+  applied_at?: string;
 };
 
 export type EvaluationResult = {

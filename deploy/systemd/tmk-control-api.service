@@ -1,0 +1,19 @@
+[Unit]
+Description=TMK unified control API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tmk-control-api
+Group=tmk-control-api
+ExecStart=/opt/tmk-control-api/current/tmk-control-api
+EnvironmentFile=-/etc/tmk-control-api.env
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/tmk-control-api
+
+[Install]
+WantedBy=multi-user.target

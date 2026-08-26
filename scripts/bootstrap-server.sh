@@ -1,144 +1,67 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-
-if [[ ${EUID} -ne 0 ]]; then
-  echo "bootstrap-server.sh must run as root" >&2
-  exit 1
-fi
-
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-repo_root=$(cd "${script_dir}/.." && pwd)
-
+[[ ${EUID} -eq 0 ]] || { echo "bootstrap-server.sh must run as root" >&2; exit 1; }
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 install -m 0755 "${repo_root}/scripts/deploy-server.sh" /usr/local/sbin/tmk-deploy
-install -m 0755 "${repo_root}/scripts/configure-auth.sh" /usr/local/sbin/tmk-configure-auth
-install -m 0755 "${repo_root}/scripts/clear-bootstrap-auth.sh" /usr/local/sbin/tmk-clear-bootstrap-auth
-install -m 0755 "${repo_root}/scripts/configure-observability.sh" /usr/local/sbin/tmk-configure-observability
-install -m 0755 "${repo_root}/scripts/configure-nginx-capacity.sh" /usr/local/sbin/tmk-configure-nginx-capacity
 install -m 0755 "${repo_root}/scripts/deploy-admin.sh" /usr/local/sbin/tmk-deploy-admin
+install -m 0755 "${repo_root}/scripts/deploy-control-api.sh" /usr/local/sbin/tmk-deploy-control-api
 install -m 0755 "${repo_root}/scripts/deploy-monitor.sh" /usr/local/sbin/tmk-deploy-monitor
-install -m 0755 "${repo_root}/scripts/deploy-admin-api.sh" /usr/local/sbin/tmk-deploy-admin-api
 install -m 0755 "${repo_root}/scripts/record-deployment.sh" /usr/local/sbin/tmk-record-deployment
 install -m 0644 "${repo_root}/deploy/systemd/tmk-glance@.service" /etc/systemd/system/tmk-glance@.service
-install -m 0644 "${repo_root}/deploy/systemd/tmk-monitor@.service" /etc/systemd/system/tmk-monitor@.service
-install -m 0644 "${repo_root}/deploy/systemd/tmk-admin-api@.service" /etc/systemd/system/tmk-admin-api@.service
+install -m 0644 "${repo_root}/deploy/systemd/tmk-control-api.service" /etc/systemd/system/tmk-control-api.service
+install -m 0644 "${repo_root}/deploy/systemd/tmk-monitor.service" /etc/systemd/system/tmk-monitor.service
 
 for environment in test production; do
-  app_user="tmk-${environment}"
-  deploy_user="tmk-deploy-${environment}"
-
-  if ! id "${app_user}" >/dev/null 2>&1; then
-    useradd --system --home-dir "/var/lib/tmk/${environment}" --shell /usr/sbin/nologin "${app_user}"
-  fi
-  if ! id "${deploy_user}" >/dev/null 2>&1; then
-    useradd --create-home --shell /bin/bash "${deploy_user}"
-  fi
-
+  app_user="tmk-${environment}"; deploy_user="tmk-deploy-${environment}"
+  id "${app_user}" >/dev/null 2>&1 || useradd --system --home-dir "/var/lib/tmk/${environment}" --shell /usr/sbin/nologin "${app_user}"
+  id "${deploy_user}" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "${deploy_user}"
   install -d -m 0755 -o root -g root "/opt/tmk/${environment}/releases"
   install -d -m 0750 -o "${app_user}" -g "${app_user}" "/var/lib/tmk/${environment}"
   install -d -m 0750 -o "${deploy_user}" -g "${deploy_user}" "/var/lib/tmk-deploy/${environment}"
+  wrapper="/usr/local/sbin/tmk-deploy-${environment}"; printf '#!/bin/sh\nexec /usr/local/sbin/tmk-deploy %s "$@"\n' "${environment}" >"${wrapper}"; chmod 0755 "${wrapper}"
+  printf '%s ALL=(root) NOPASSWD: %s *\n' "${deploy_user}" "${wrapper}" >"/etc/sudoers.d/tmk-deploy-${environment}"; chmod 0440 "/etc/sudoers.d/tmk-deploy-${environment}"
   install -d -m 0750 -o root -g "${app_user}" "/etc/tmk/${environment}"
-
-  if [[ ! -f /etc/tmk/${environment}/config.yaml ]]; then
-    install -m 0640 -o root -g "${app_user}" \
-      "${repo_root}/deploy/config/${environment}.yaml" "/etc/tmk/${environment}/config.yaml"
-  fi
-  if [[ ! -f /etc/tmk/${environment}/tmk.env ]]; then
-    install -m 0640 -o root -g "${app_user}" /dev/null "/etc/tmk/${environment}/tmk.env"
-  fi
-
-  wrapper="/usr/local/sbin/tmk-deploy-${environment}"
-  printf '#!/bin/sh\nexec /usr/local/sbin/tmk-deploy %s "$@"\n' "${environment}" >"${wrapper}"
-  chmod 0755 "${wrapper}"
-
-  admin_wrapper="/usr/local/sbin/tmk-deploy-admin-${environment}"
-  printf '#!/bin/sh\nexec /usr/local/sbin/tmk-deploy-admin %s "$@"\n' "${environment}" >"${admin_wrapper}"
-  chmod 0755 "${admin_wrapper}"
-
-  monitor_wrapper="/usr/local/sbin/tmk-deploy-monitor-${environment}"
-  printf '#!/bin/sh\nexec /usr/local/sbin/tmk-deploy-monitor %s "$@"\n' "${environment}" >"${monitor_wrapper}"
-  chmod 0755 "${monitor_wrapper}"
-
-  sudoers="/etc/sudoers.d/tmk-deploy-${environment}"
-  printf '%s ALL=(root) NOPASSWD: %s *\n' "${deploy_user}" "${wrapper}" >"${sudoers}"
-  chmod 0440 "${sudoers}"
-  visudo -cf "${sudoers}" >/dev/null
-  printf '%s ALL=(root) NOPASSWD: %s *\n' "${deploy_user}" "${admin_wrapper}" >"/etc/sudoers.d/tmk-deploy-admin-${environment}"
-  chmod 0440 "/etc/sudoers.d/tmk-deploy-admin-${environment}"
-  visudo -cf "/etc/sudoers.d/tmk-deploy-admin-${environment}" >/dev/null
-  printf '%s ALL=(root) NOPASSWD: %s *\n' "${deploy_user}" "${monitor_wrapper}" >"/etc/sudoers.d/tmk-deploy-monitor-${environment}"
-  chmod 0440 "/etc/sudoers.d/tmk-deploy-monitor-${environment}"
-  visudo -cf "/etc/sudoers.d/tmk-deploy-monitor-${environment}" >/dev/null
 done
 
-for environment in test production; do
-  user="tmk-admin-api-${environment}"; id "$user" >/dev/null 2>&1 || useradd --system --home-dir "/var/lib/tmk-admin-api/${environment}" --shell /usr/sbin/nologin "$user"
-  install -d -m 0750 -o "$user" -g "$user" "/var/lib/tmk-admin-api/${environment}" "/opt/tmk-admin-api/${environment}/releases"
-  install -d -m 0750 -o root -g "$user" /etc/tmk-admin-api
-  if [[ ! -f "/etc/tmk-admin-api/${environment}.env" ]]; then
-    port=":18180"; glance="http://127.0.0.1:18080"; [[ "$environment" == production ]] && port=":28180" && glance="http://127.0.0.1:8080"
-    printf 'ADMIN_API_ADDR=%s\nGLANCE_INTERNAL_URL=%s\nADMIN_API_AUDIT_LOG=/var/lib/tmk-admin-api/%s/audit.jsonl\n' "$port" "$glance" "$environment" > "/etc/tmk-admin-api/${environment}.env"
-    chown root:"$user" "/etc/tmk-admin-api/${environment}.env"; chmod 0640 "/etc/tmk-admin-api/${environment}.env"
-  fi
-  if ! grep -q '^ADMIN_API_SERVICE_SECRET=' "/etc/tmk-admin-api/${environment}.env"; then
-    service_secret=$(openssl rand -hex 32)
-    printf 'ADMIN_API_SERVICE_SECRET=%s\n' "$service_secret" >> "/etc/tmk-admin-api/${environment}.env"
-    printf 'ADMIN_API_SERVICE_ID=tmk-admin-api\nADMIN_API_SERVICE_SECRET=%s\n' "$service_secret" >> "/etc/tmk/${environment}/tmk.env"
-  fi
-  wrapper="/usr/local/sbin/tmk-deploy-admin-api-${environment}"; printf '#!/bin/sh\nexec /usr/local/sbin/tmk-deploy-admin-api %s "$@"\n' "$environment" > "$wrapper"; chmod 0755 "$wrapper"
-  deploy_user="tmk-deploy-${environment}"; printf '%s ALL=(root) NOPASSWD: %s *\n' "$deploy_user" "$wrapper" > "/etc/sudoers.d/tmk-deploy-admin-api-${environment}"; chmod 0440 "/etc/sudoers.d/tmk-deploy-admin-api-${environment}"; visudo -cf "/etc/sudoers.d/tmk-deploy-admin-api-${environment}" >/dev/null
-done
+id tmk-control-api >/dev/null 2>&1 || useradd --system --home-dir /var/lib/tmk-control-api --shell /usr/sbin/nologin tmk-control-api
+id tmk-monitor >/dev/null 2>&1 || useradd --system --home-dir /var/lib/tmk-monitor --shell /usr/sbin/nologin tmk-monitor
+install -d -m 0750 -o tmk-control-api -g tmk-control-api /var/lib/tmk-control-api /opt/tmk-control-api/releases
+install -d -m 0750 -o tmk-monitor -g tmk-monitor /var/lib/tmk-monitor /opt/tmk-monitor/releases
+install -d -m 0750 -o root -g tmk-control-api /etc/tmk-control-api.d
+install -d -m 0750 -o root -g tmk-monitor /etc/tmk-monitor.d
 
-for environment in test production; do
-  monitor_user="tmk-monitor-${environment}"
-  if ! id "${monitor_user}" >/dev/null 2>&1; then
-    useradd --system --home-dir "/var/lib/tmk-monitor/${environment}" --shell /usr/sbin/nologin "${monitor_user}"
-  fi
-  install -d -m 0750 -o "${monitor_user}" -g "${monitor_user}" "/var/lib/tmk-monitor/${environment}"
-  install -d -m 0750 -o root -g "${monitor_user}" "/etc/tmk-monitor"
-  if [[ ! -f "/etc/tmk-monitor/${environment}.env" ]]; then
-    monitor_port=":19090"
-    health_url="http://127.0.0.1:18080/api/health/ready"
-    admin_health_url="http://127.0.0.1:18180/api/health/live"
-    [[ ${environment} == production ]] && monitor_port=":29090" && health_url="http://127.0.0.1:8080/api/health/ready" && admin_health_url="http://127.0.0.1:28180/api/health/live"
-    umask 0027
-    {
-      printf 'MONITOR_PORT=%s\n' "${monitor_port}"
-      printf 'MONITOR_ENVIRONMENT=%s\n' "${environment}"
-      printf 'PROMETHEUS_URL=http://127.0.0.1:9090\n'
-      printf 'ALERTMANAGER_URL=http://127.0.0.1:9093\n'
-      printf 'TMK_HEALTH_URL=%s\n' "${health_url}"
-      printf 'ADMIN_API_HEALTH_URL=%s\n' "${admin_health_url}"
-      printf 'MONITOR_BASIC_USER=monitor\nMONITOR_BASIC_PASSWORD=%s\n' "$(openssl rand -hex 24)"
-    } >"/etc/tmk-monitor/${environment}.env"
-    chown root:"${monitor_user}" "/etc/tmk-monitor/${environment}.env"
-    chmod 0640 "/etc/tmk-monitor/${environment}.env"
-  fi
-  if ! grep -q '^MONITOR_BASIC_PASSWORD=' "/etc/tmk-monitor/${environment}.env"; then
-    printf 'MONITOR_BASIC_USER=monitor\nMONITOR_BASIC_PASSWORD=%s\n' "$(openssl rand -hex 24)" >>"/etc/tmk-monitor/${environment}.env"
-  fi
-  if ! grep -q '^MONITOR_WEBHOOK_TOKEN=' "/etc/tmk-monitor/${environment}.env"; then
-    printf 'MONITOR_WEBHOOK_TOKEN=%s\n' "$(openssl rand -hex 32)" >>"/etc/tmk-monitor/${environment}.env"
-  fi
-  if ! grep -q '^MONITOR_LOG_PATH=' "/etc/tmk-monitor/${environment}.env"; then
-    printf 'MONITOR_LOG_PATH=/var/log/tmk/combined.jsonl\nMONITOR_DEPLOYMENT_PATH=/var/lib/tmk-monitor/%s/deployments.jsonl\nMONITOR_INCIDENT_PATH=/var/lib/tmk-monitor/%s/incidents.jsonl\n' "${environment}" "${environment}" >>"/etc/tmk-monitor/${environment}.env"
-  fi
-  chown root:"${monitor_user}" "/etc/tmk-monitor/${environment}.env"
-  chmod 0640 "/etc/tmk-monitor/${environment}.env"
-done
-
-install -d -m 0750 -o root -g root /etc/prometheus
-if [[ ! -f /etc/prometheus/tmk-monitor-webhook-token ]]; then
-  awk -F= '/^MONITOR_WEBHOOK_TOKEN=/{print $2; exit}' /etc/tmk-monitor/test.env > /etc/prometheus/tmk-monitor-webhook-token
-  chmod 0640 /etc/prometheus/tmk-monitor-webhook-token
+if [[ ! -f /etc/tmk-control-api.env ]]; then
+  cat >/etc/tmk-control-api.env <<EOF
+ADMIN_API_ADDR=:17180
+CONTROL_TEST_GLANCE_URL=http://127.0.0.1:18080
+CONTROL_PRODUCTION_GLANCE_URL=http://127.0.0.1:8080
+ADMIN_API_AUDIT_LOG=/var/lib/tmk-control-api/audit.jsonl
+ADMIN_API_SERVICE_ID=tmk-control-api
+EOF
+  chown root:tmk-control-api /etc/tmk-control-api.env; chmod 0640 /etc/tmk-control-api.env
 fi
-if id prometheus >/dev/null 2>&1; then chown root:prometheus /etc/prometheus/tmk-monitor-webhook-token; fi
-shared_webhook_token=$(tr -d '\r\n' </etc/prometheus/tmk-monitor-webhook-token)
-for environment in test production; do
-  sed -i "s/^MONITOR_WEBHOOK_TOKEN=.*/MONITOR_WEBHOOK_TOKEN=${shared_webhook_token}/" "/etc/tmk-monitor/${environment}.env"
-done
-
+if ! grep -q '^ADMIN_API_SERVICE_SECRET=' /etc/tmk-control-api.env; then
+  control_secret=$(openssl rand -hex 32)
+  printf 'ADMIN_API_SERVICE_SECRET=%s\n' "${control_secret}" >>/etc/tmk-control-api.env
+  for environment in test production; do
+    printf 'ADMIN_API_SERVICE_ID=tmk-control-api\nADMIN_API_SERVICE_SECRET=%s\n' "${control_secret}" >>"/etc/tmk/${environment}/tmk.env"
+  done
+fi
+if [[ ! -f /etc/tmk-monitor.env ]]; then
+  cat >/etc/tmk-monitor.env <<EOF
+MONITOR_PORT=:17090
+MONITOR_TEST_PROMETHEUS_URL=http://127.0.0.1:9090
+MONITOR_PRODUCTION_PROMETHEUS_URL=http://127.0.0.1:9090
+MONITOR_TEST_ALERTMANAGER_URL=http://127.0.0.1:9093
+MONITOR_PRODUCTION_ALERTMANAGER_URL=http://127.0.0.1:9093
+MONITOR_TEST_TARGET_HEALTH_URL=http://127.0.0.1:18080/api/health/ready
+MONITOR_PRODUCTION_TARGET_HEALTH_URL=http://127.0.0.1:8080/api/health/ready
+MONITOR_CONTROL_HEALTH_URL=http://127.0.0.1:17180/api/health/live
+MONITOR_BASIC_USER=monitor
+MONITOR_BASIC_PASSWORD=$(openssl rand -hex 24)
+MONITOR_LOG_PATH=/var/log/tmk/combined.jsonl
+EOF
+  chown root:tmk-monitor /etc/tmk-monitor.env; chmod 0640 /etc/tmk-monitor.env
+fi
 systemctl daemon-reload
-if ! command -v ffmpeg >/dev/null 2>&1; then
-  echo "warning: ffmpeg is not installed; async evaluation is limited to 16kHz 16-bit mono PCM WAV" >&2
-fi
-echo "TMK host layout installed; no application service was started"
+echo "TMK unified control/monitor deployment layout installed; services were not started"

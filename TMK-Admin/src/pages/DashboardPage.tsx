@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Activity, Database, HardDrive, RefreshCw, Users } from "lucide-react";
+import { Activity, Database, HardDrive, RefreshCw, Users, Radio } from "lucide-react";
 import { api } from "../api";
 import { Empty, ErrorNotice, formatBytes, formatDate, formatRate, Loading, Metric, PageHeader, Status } from "../components";
-import type { Dashboard } from "../types";
+import type { Dashboard, SegmenterRuntimeConfig } from "../types";
 
 export default function DashboardPage() {
   const [data, setData] = useState<Dashboard>();
@@ -28,6 +28,7 @@ export default function DashboardPage() {
         <Metric label="评测样本" value={data.evaluations.completed_items} detail={`${data.evaluations.failed_items} 条失败`} tone={data.evaluations.failed_items ? "warn" : "good"} />
         <Metric label="对象存储" value={formatBytes(data.storage.bytes)} detail={`${data.storage.objects} 个文件`} />
       </section>
+      <SegmenterControl />
 
       <section className="dashboard-grid">
         <div className="panel trend-panel">
@@ -59,6 +60,13 @@ export default function DashboardPage() {
       </section>
     </>}
   </>;
+}
+
+function SegmenterControl() {
+  const [config, setConfig] = useState<SegmenterRuntimeConfig>(); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  useEffect(() => { api.request<SegmenterRuntimeConfig>("/admin/settings/segmenter").then(setConfig).catch((reason) => setError(reason.message)); }, []);
+  const toggle = async () => { if (!config) return; setBusy(true); try { setConfig(await api.request<SegmenterRuntimeConfig>("/admin/settings/segmenter", { method: "PUT", body: JSON.stringify({ enabled: !config.enabled, rollout_percent: config.rollout_percent || 100, version: config.version, change_reason: `管理后台${config.enabled ? "关闭" : "启用"}实时分段器` }) })); } catch (reason) { setError((reason as Error).message); } finally { setBusy(false); } };
+  return <section className="panel compact-panel"><div className="panel-heading"><div><h2><Radio size={18} />实时分段器</h2><p>仅影响新建实时会话，A/B 评测使用固定变体配置</p></div><button className="button-secondary" onClick={toggle} disabled={!config || busy}>{config?.enabled ? "关闭" : "开启"}</button></div>{error && <ErrorNotice message={error} />}<dl className="definition-list"><div><dt>运行状态</dt><dd>{config ? (config.enabled ? "已启用" : "已关闭") : "加载中"}</dd></div><div><dt>目标 revision</dt><dd>{config?.revision ?? "-"}</dd></div><div><dt>应用状态</dt><dd>{config?.status ?? "-"}</dd></div></dl></section>;
 }
 
 function Trend({ data }: { data: Dashboard["daily"] }) {

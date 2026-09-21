@@ -1,8 +1,6 @@
-name: External Monitor Probe
+name: External Monitor Probe (Paused)
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -13,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      - name: Explain paused monitor
+        run: echo "External monitor is paused because the monitored server is decommissioned."
       - name: Probe emergency monitoring plane
         run: |
           curl --fail --show-error --silent --max-time 15 --retry 2 https://117.72.159.185/tmk-monitor/api/health/live
